@@ -9,10 +9,11 @@ let physicsWorld;
 
 let character = null;
 
-// 단일 빌딩 관리를 위한 전역 변수
+// 단일 빌딩 및 텍스처 관리를 위한 전역 변수
 let targetBuildingMesh = null;
 let targetBuildingCollider = null;
 let targetBuildingBody = null;
+let buildingTexture = null; 
 
 let characterModel = null;
 let mixer = null;
@@ -47,7 +48,7 @@ const keys = {
 // UI 출력을 위한 DOM 요소 생성
 const uiDisplay = document.createElement('div');
 uiDisplay.style.position = 'absolute'; uiDisplay.style.top = '15px'; uiDisplay.style.left = '15px';
-uiDisplay.style.padding = '12px'; uiDisplay.style.background = 'rgba(0,0,0,0.75)';
+uiDisplay.style.padding = '12px'; uiDisplay.style.background = 'rgba(0,0,0,0.85)';
 uiDisplay.style.color = '#fff'; uiDisplay.style.fontFamily = 'monospace'; uiDisplay.style.borderRadius = '5px';
 uiDisplay.style.zIndex = '999'; uiDisplay.innerHTML = '💥 마지막 충격량: 0 N·s<br> 상태: 대기 중';
 document.body.appendChild(uiDisplay);
@@ -81,7 +82,6 @@ const START_BUILDING_WIDTH = 25;
 const params = {
   buildingHeight: 80, 
   gravityPreset: '지구',
-  airResistance: 0.1,
   simulationActive: false,
   characterMass: 70,    
   dieThreshold: 2500,   
@@ -107,33 +107,67 @@ async function init() {
 
 function initThree() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xbfd1e5); 
+  
+  // ★ 지면 가시성 확보를 위해 선형 안개(Linear Fog)로 교체
+  // 가까운 거리(10m)부터 먼 거리(2000m)까지 서서히 안개가 끼므로 아래 지면이 선명하게 청소됩니다.
+  scene.fog = new THREE.Fog(0xff9e80, 10, 2000);
   
   camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 200000);
-  camera.position.set(0, params.buildingHeight + 20, 100);
+  // ★ 시작 시 카메라 가우징 각도를 넓혀 아래 바닥이 자연스럽게 시야에 들어오도록 조정
+  camera.position.set(0, params.buildingHeight + 40, 140);
   
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  
+  // 시네마틱 톤 매핑 설정
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.9; 
+  
   document.body.appendChild(renderer.domElement);
   
   orbitControls = new OrbitControls(camera, renderer.domElement);
   orbitControls.enableDamping = true;
   orbitControls.target.set(0, params.buildingHeight, 0);
   
-  const ambientLight = new THREE.AmbientLight(0xffffff, 1.3);
+  // ★ 지면 그늘이 너무 어둡게 뭉치는 현상을 방지하기 위해 환경 조명 광량 대폭 보강
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
   scene.add(ambientLight);
   
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-  dirLight.position.set(500, 2000, 500);
+  const hemiLight = new THREE.HemisphereLight(0x6c4d85, 0xff8a69, 0.8);
+  hemiLight.position.set(0, 500, 0);
+  scene.add(hemiLight);
+  
+  const dirLight = new THREE.DirectionalLight(0xffedd6, 1.5);
+  dirLight.position.set(1200, 300, -50); // 그림자가 너무 길어지지 않게 고도 살짝 상향
   dirLight.castShadow = true;
+  dirLight.shadow.mapSize.width = 2048;
+  dirLight.shadow.mapSize.height = 2048;
+  dirLight.shadow.camera.near = 0.5;
+  dirLight.shadow.camera.far = 400000;
+  const d = 500;
+  dirLight.shadow.camera.left = -d; dirLight.shadow.camera.right = d;
+  dirLight.shadow.camera.top = d; dirLight.shadow.camera.bottom = -d;
   scene.add(dirLight);
+
+  initPanoramaSkybox();
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+
+function initPanoramaSkybox() {
+  const textureLoader = new THREE.TextureLoader();
+  textureLoader.load('./assets/textures/skybox/sky_12_2k.jpg', (texture) => {
+    texture.mapping = THREE.EquirectangularReflectionMapping;
+    texture.colorSpace = THREE.SRGBColorSpace; 
+    
+    scene.background = texture;
+    scene.environment = texture; 
   });
 }
 
@@ -143,24 +177,55 @@ async function initPhysics() {
 }
 
 function buildCity() {
+  const textureLoader = new THREE.TextureLoader();
+
+  // ★ 1. 돌바닥 텍스처 로드 및 무한 반복 설정
+  // 파일명과 경로는 프로젝트 폴더 구조에 맞게 수정해 주세요. (예: './assets/textures/stone_floor.jpg')
+  const groundTexture = textureLoader.load('./assets/textures/stone_floor.jpg', (tex) => {
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    // 50000m의 광활한 영토이므로, 텍스처가 깨지지 않게 가로세로 2,000번 반복 바둑판 배열 지정
+    tex.repeat.set(2000, 2000); 
+  });
+
+  // ★ 2. 재질(Material)의 map 속성에 돌바닥 매핑 및 반사율 미세 조정
+  const groundMaterial = new THREE.MeshStandardMaterial({ 
+    map: groundTexture,
+    roughness: 0.65,       // 돌 특유의 거친 느낌 유지
+    metalness: 0.15,       // 노을빛이 바닥에 미세하게 반사되도록 살짝 부여
+  });
+
+  // 지면 메쉬 생성 (돌바닥 평면)
   const groundMesh = new THREE.Mesh(
     new THREE.PlaneGeometry(50000, 50000), 
-    new THREE.MeshStandardMaterial({ color: 0x2e8b57, roughness: 0.9 })
+    groundMaterial
   );
   groundMesh.rotation.x = -Math.PI / 2;
   groundMesh.position.set(0, 0, 0); 
   groundMesh.receiveShadow = true;
   scene.add(groundMesh);
   
+  // 물리 엔진 지면 바디 및 콜라이더 (기존 코드 유지)
   const groundBody = physicsWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -50.0, 0));
-  const groundColliderDesc = RAPIER.ColliderDesc.cuboid(25000, 50.0, 25000) 
-    .setRestitution(0.05) 
-    .setFriction(0.9);
+  const groundColliderDesc = RAPIER.ColliderDesc.cuboid(25000, 50.0, 25000).setRestitution(0.05).setFriction(0.9);
   physicsWorld.createCollider(groundColliderDesc, groundBody);
+
+  // 빌딩 생성 및 텍스처 매핑 (기존 코드 유지)
+  buildingTexture = textureLoader.load('./assets/textures/building_window.jpg', (tex) => {
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(2, params.buildingHeight / 10); 
+  });
+
+  const buildingMaterial = new THREE.MeshStandardMaterial({ 
+    map: buildingTexture,
+    roughness: 0.15,
+    metalness: 0.55 
+  });
 
   const startBuildingMesh = new THREE.Mesh(
     new THREE.BoxGeometry(START_BUILDING_WIDTH, params.buildingHeight, START_BUILDING_WIDTH), 
-    new THREE.MeshStandardMaterial({ color: 0x3b4252, roughness: 0.5 })
+    buildingMaterial
   );
   startBuildingMesh.position.set(0, params.buildingHeight / 2, 0);
   startBuildingMesh.castShadow = true; startBuildingMesh.receiveShadow = true;
@@ -172,12 +237,19 @@ function buildCity() {
   targetBuildingCollider = physicsWorld.createCollider(colliderDesc, targetBuildingBody);
 }
 
+
 function updateBuildingHeight(newHeight) {
   if (!targetBuildingMesh || !physicsWorld) return;
   const safeHeight = newHeight <= 0 ? 0.1 : newHeight;
+  
   targetBuildingMesh.geometry.dispose(); 
   targetBuildingMesh.geometry = new THREE.BoxGeometry(START_BUILDING_WIDTH, safeHeight, START_BUILDING_WIDTH);
   targetBuildingMesh.position.set(0, safeHeight / 2, 0);
+
+  if (buildingTexture) {
+    buildingTexture.repeat.set(2, safeHeight / 10);
+    buildingTexture.needsUpdate = true; 
+  }
 
   if (targetBuildingCollider) physicsWorld.removeCollider(targetBuildingCollider, false);
   if (targetBuildingBody) physicsWorld.removeRigidBody(targetBuildingBody);
@@ -222,12 +294,12 @@ async function loadAnimations() {
     try {
       const fallObj = await loadFBX('Falling.fbx');
       actions[1] = mixer.clipAction(fallObj.animations[0], characterModel); actions[1].name = 'Falling';
-    } catch(e) {}
+    } catch(e) { console.warn('Falling 애니메이션 로드 실패'); }
 
     try {
       const walkObj = await loadFBX('Walking.fbx');
       actions[2] = mixer.clipAction(walkObj.animations[0], characterModel); actions[2].name = 'Walking';
-    } catch(e) {}
+    } catch(e) { console.warn('Walking 애니메이션 로드 실패'); }
 
     try {
       const dieObj = await loadFBX('fall_die.fbx');
@@ -246,7 +318,7 @@ async function loadAnimations() {
     } catch(e) { console.warn('fall_live.fbx 로드 실패'); }
 
   } catch (error) {
-    console.error(error);
+    console.error('기본 모델 스킨 로드 실패:', error);
   } finally {
     respawnCharacter();
   }
@@ -282,7 +354,8 @@ function respawnCharacter() {
   lastVelocity.set(0, 0, 0);
 
   orbitControls.target.set(0, params.buildingHeight, 0);
-  camera.position.set(0, params.buildingHeight + 10, 30);
+  // ★ 스폰 시에도 카메라가 조금 더 후퇴하여 주변 지면과의 원근감을 인지할 수 있도록 보정
+  camera.position.set(0, params.buildingHeight + 15, 45);
   orbitControls.update();
 }
 
@@ -295,8 +368,6 @@ function startJump() {
   if(actions[actionIndex]) actions[actionIndex].stop(); 
   if(actions[1]) { actions[1].reset().play(); actionIndex = 1; }
 
-  // ★ 수정: 수평 튕겨나가는 힘(x, z축 속도)을 6.0에서 25.0으로 4배 이상 강력하게 변경 ★
-  // 건물 중심(0,0)에서 가로폭 반절인 12.5m 펜스를 한 번에 넘어가도록 밀어줍니다.
   character.body.setLinvel({ x: 25.0, y: 12.0, z: 25.0 }, true);
 }
 
@@ -331,16 +402,21 @@ function handleImpact(impulseValue) {
           if(actions[0]) { actions[0].reset().play(); actionIndex = 0; }
         }
       }, duration);
+    } else {
+      isRecovering = false;
+      if(actions[0]) { actions[0].reset().play(); actionIndex = 0; }
     }
   }
 }
 
 function animate() {
   requestAnimationFrame(animate);
-  const dt = clock.getDelta();
+  const dt = Math.min(clock.getDelta(), 0.1); 
   if (mixer) mixer.update(dt);
   
   if (params.simulationActive && physicsWorld) {
+    physicsWorld.timestep = dt;
+
     if (character && isFalling) {
       const v = character.body.linvel();
       lastVelocity.set(v.x, v.y, v.z);
@@ -387,9 +463,10 @@ function animate() {
           
           targetRotationAngle = Math.atan2(moveX, moveZ);
           let diff = targetRotationAngle - currentRotationAngle;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          while (diff > Math.PI) diff -= Math.PI * 2;
+          
+          diff = Math.atan2(Math.sin(diff), Math.cos(diff)); 
           currentRotationAngle += diff * 0.2; 
+          
           tempQuat.setFromAxisAngle(upAxis, currentRotationAngle);
           character.body.setRotation({ x: tempQuat.x, y: tempQuat.y, z: tempQuat.z, w: tempQuat.w }, true);
           
@@ -426,7 +503,9 @@ function animate() {
     character.mesh.position.set(pos.x, renderY, pos.z);
     character.mesh.quaternion.set(rot.x, rot.y, rot.z, rot.w);
     
-    tempVec3.set(pos.x, pos.y + 10, pos.z + 25);
+    // ★ 카메라 추적 보간 로직 고도화
+    // 캐릭터가 땅에 가까워지면 카메라도 지면 쪽을 비출 수 있도록 유연하게 타깃이 변합니다.
+    tempVec3.set(pos.x, pos.y + 10, pos.z + 30);
     camera.position.lerp(tempVec3, 0.05);
     orbitControls.target.set(pos.x, pos.y, pos.z);
   }
