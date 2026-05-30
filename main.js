@@ -114,6 +114,9 @@ window.addEventListener('keydown', (e) => {
     case 'KeyD':
       keys.right = true;
       break;
+    case 'Space':
+      startJump();
+      break;
   }
   if (!params.simulationActive && (keys.forward || keys.backward || keys.left || keys.right)) {
     params.simulationActive = true;
@@ -483,7 +486,7 @@ function initGUI() {
   const gui = new GUI();
   gui.title('시뮬레이터 조작 설정');
   gui
-    .add(params, 'buildingHeight', 0, 1000, 10)
+    .add(params, 'buildingHeight', 0, 828, 10) // 세계 최대 빌딩 높이: 828m
     .name('🏢 빌딩 높이 (m)')
     .onChange((v) => updateBuildingHeight(v));
   gui.add(params, 'characterMass', 10, 200, 5).name('⚖️ 캐릭터 질량 (kg)');
@@ -523,6 +526,9 @@ function initGUI() {
       }
 
       if (groundMaterial) groundMaterial.needsUpdate = true;
+      if (document.activeElement) {
+        document.activeElement.blur();
+      }
     });
 }
 
@@ -646,6 +652,9 @@ function respawnCharacter() {
   // ★ 스폰 시에도 카메라가 조금 더 후퇴하여 주변 지면과의 원근감을 인지할 수 있도록 보정
   camera.position.set(0, params.buildingHeight + 15, 45);
   orbitControls.update();
+  if (document.activeElement) {
+    document.activeElement.blur();
+  }
 }
 
 function startJump() {
@@ -661,7 +670,14 @@ function startJump() {
     actionIndex = 1;
   }
 
-  character.body.setLinvel({ x: 25.0, y: 12.0, z: 25.0 }, true);
+  const jumpSpeed = 16.0;
+  // 캐릭터가 바라보는 방향으로 점프하도록 초기 속도 벡터 계산
+  const vx = Math.sin(currentRotationAngle) * jumpSpeed;
+  const vz = Math.cos(currentRotationAngle) * jumpSpeed;
+  character.body.setLinvel({ x: vx, y: 5.5, z: vz }, true);
+  if (document.activeElement) {
+    document.activeElement.blur();
+  }
 }
 
 function handleImpact(impulseValue) {
