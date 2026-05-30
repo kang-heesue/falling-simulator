@@ -484,7 +484,7 @@ function initGUI() {
   const gui = new GUI();
   gui.title('시뮬레이터 조작 설정');
   gui
-    .add(params, 'buildingHeight', 0, 10000, 10)
+    .add(params, 'buildingHeight', 0, 1000, 10)
     .name('🏢 빌딩 높이 (m)')
     .onChange((v) => updateBuildingHeight(v));
   gui.add(params, 'characterMass', 10, 200, 5).name('⚖️ 캐릭터 질량 (kg)');
