@@ -15,6 +15,15 @@ let targetBuildingCollider = null;
 let targetBuildingBody = null;
 let buildingTexture = null;
 
+// 지면 텍스처 및 재질 관리를 위한 전역 변수
+let groundMaterial = null;
+let stoneTexture = null;
+let moonTexture = null;
+
+// 하늘 텍스처 관리를 위한 전역 변수
+let skyTexture = null;
+let spaceTexture = null;
+
 let characterModel = null;
 let mixer = null;
 const clock = new THREE.Clock();
@@ -202,12 +211,25 @@ function initThree() {
 
 function initPanoramaSkybox() {
   const textureLoader = new THREE.TextureLoader();
-  textureLoader.load('./assets/textures/skybox/sky_12_2k.jpg', (texture) => {
+
+  skyTexture = textureLoader.load('./assets/textures/skybox/sky_12_2k.jpg', (texture) => {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     texture.colorSpace = THREE.SRGBColorSpace;
 
-    scene.background = texture;
-    scene.environment = texture;
+    if (params.gravityPreset !== '달') {
+      scene.background = texture;
+      scene.environment = texture;
+    }
+  });
+
+  spaceTexture = textureLoader.load('./assets/textures/skybox/space.jpg', (texture) => {
+    texture.mapping = THREE.EquirectangularReflectionMapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+
+    if (params.gravityPreset === '달') {
+      scene.background = texture;
+      scene.environment = texture;
+    }
   });
 }
 
@@ -219,18 +241,23 @@ async function initPhysics() {
 function buildCity() {
   const textureLoader = new THREE.TextureLoader();
 
-  // ★ 1. 돌바닥 텍스처 로드 및 무한 반복 설정
-  // 파일명과 경로는 프로젝트 폴더 구조에 맞게 수정해 주세요. (예: './assets/textures/stone_floor.jpg')
-  const groundTexture = textureLoader.load('./assets/textures/stone_floor.jpg', (tex) => {
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
+  // ★ 1. 지면 텍스처 로드 및 무한 반복 설정
+  stoneTexture = textureLoader.load('./assets/textures/floor/stone.jpg', (texture) => {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
     // 50000m의 광활한 영토이므로, 텍스처가 깨지지 않게 가로세로 2,000번 반복 바둑판 배열 지정
-    tex.repeat.set(2000, 2000);
+    texture.repeat.set(2000, 2000);
   });
 
-  // ★ 2. 재질(Material)의 map 속성에 돌바닥 매핑 및 반사율 미세 조정
-  const groundMaterial = new THREE.MeshStandardMaterial({
-    map: groundTexture,
+  moonTexture = textureLoader.load('./assets/textures/floor/moon.jpg', (texture) => {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1000, 1000);
+  });
+
+  // ★ 2. 재질(Material)의 map 속성에 기본(돌) 바닥 매핑 및 반사율 미세 조정
+  groundMaterial = new THREE.MeshStandardMaterial({
+    map: params.gravityPreset === '달' ? moonTexture : stoneTexture,
     roughness: 0.65, // 돌 특유의 거친 느낌 유지
     metalness: 0.15, // 노을빛이 바닥에 미세하게 반사되도록 살짝 부여
   });
@@ -252,10 +279,10 @@ function buildCity() {
   physicsWorld.createCollider(groundColliderDesc, groundBody);
 
   // 빌딩 생성 및 텍스처 매핑 (기존 코드 유지)
-  buildingTexture = textureLoader.load('./assets/textures/building_window.jpg', (tex) => {
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(2, params.buildingHeight / 10);
+  buildingTexture = textureLoader.load('./assets/textures/building_window.jpg', (texture) => {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(2, params.buildingHeight / 10);
   });
 
   const buildingMaterial = new THREE.MeshStandardMaterial({
@@ -339,6 +366,27 @@ function initGUI() {
     .name('중력 환경')
     .onChange((v) => {
       physicsWorld.gravity = { x: 0, y: GRAVITY_PRESETS[v], z: 0 };
+
+      // 중력 환경이 '달'인 경우 달 지면 및 우주 배경으로 변경
+      if (v === '달') {
+        if (groundMaterial) groundMaterial.map = moonTexture;
+        if (spaceTexture) {
+          scene.background = spaceTexture;
+          scene.environment = spaceTexture;
+        }
+        // 안개 색상을 우주에 맞는 검은색으로 변경
+        if (scene.fog) scene.fog.color.setHex(0x000000);
+      } else {
+        if (groundMaterial) groundMaterial.map = stoneTexture;
+        if (skyTexture) {
+          scene.background = skyTexture;
+          scene.environment = skyTexture;
+        }
+        // 안개 색상을 원래로 복원
+        if (scene.fog) scene.fog.color.setHex(0xff9e80);
+      }
+
+      if (groundMaterial) groundMaterial.needsUpdate = true;
     });
 }
 
