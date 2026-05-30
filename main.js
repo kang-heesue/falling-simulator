@@ -387,14 +387,13 @@ function buildCity() {
       const baseX = -halfRange + c * cellSize + cellSize / 2;
       const baseZ = -halfRange + r * cellSize + cellSize / 2;
 
-      // [안전 낙하 구역] 캐릭터 스폰 및 낙하 전면 궤적 구역(X -70~70, Z -70~150) 제외
-      if (baseX >= -70 && baseX <= 70 && baseZ >= -70 && baseZ <= 150) {
+      // [안전 낙하 구역] 캐릭터 낙하 시야 및 양옆 궤적 공간 확보 위해 Z >= -100 영역은 빌딩 생성 제외
+      if (baseZ >= -100) {
         continue;
       }
 
-      // [구역별 밀도 조절] Z < -100인 뒤쪽 영역은 65% 고밀도로, 앞쪽 및 옆쪽 영역은 20%로 분산
-      const isBackZone = baseZ < -100;
-      const spawnProbability = isBackZone ? 0.65 : 0.2;
+      // [구역별 밀도 조절] Z < -100인 뒤쪽 영역은 65% 고밀도로 생성
+      const spawnProbability = 0.65;
       if (Math.random() > spawnProbability) continue;
 
       // 100m 셀 크기 내에서 절대 겹치지 않도록 최대 +-20m 한도로 랜덤 위치 보정
