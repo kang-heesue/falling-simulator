@@ -3,6 +3,7 @@ import RAPIER from 'https://cdn.skypack.dev/@dimforge/rapier3d-compat';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 let scene, camera, renderer, orbitControls;
 let physicsWorld;
@@ -23,6 +24,31 @@ let moonTexture = null;
 // 하늘 텍스처 관리를 위한 전역 변수
 let skyTexture = null;
 let spaceTexture = null;
+
+// 마천루 3D 모델 및 관련 전역 변수
+const gltfLoader = new GLTFLoader();
+const backgroundBuildings = [];
+const buildingModelTypes = [
+  'building-a',
+  'building-b',
+  'building-c',
+  'building-d',
+  'building-e',
+  'building-f',
+  'building-g',
+  'building-h',
+  'building-i',
+  'building-j',
+  'building-k',
+  'building-l',
+  'building-m',
+  'building-n',
+  'building-skyscraper-a',
+  'building-skyscraper-b',
+  'building-skyscraper-c',
+  'building-skyscraper-d',
+  'building-skyscraper-e',
+];
 
 let characterModel = null;
 let mixer = null;
@@ -238,6 +264,77 @@ async function initPhysics() {
   physicsWorld = new RAPIER.World({ x: 0, y: GRAVITY_PRESETS['지구'], z: 0 });
 }
 
+function spawnDetailAsset(modelType, x, z, scale) {
+  gltfLoader.load(`./assets/models/city/${modelType}.glb`, (gltf) => {
+    gltf.scene.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const center = box.getCenter(new THREE.Vector3());
+    gltf.scene.position.set(-center.x, -box.min.y, -center.z);
+    const container = new THREE.Group();
+    container.add(gltf.scene);
+    container.scale.set(scale, scale, scale);
+    container.position.set(x, 0, z);
+    container.visible = params.gravityPreset === '지구';
+    scene.add(container);
+    backgroundBuildings.push(container);
+  });
+}
+
+function spawnBackgroundSkyscraper(modelType, x, z, targetHeight) {
+  gltfLoader.load(`./assets/models/city/${modelType}.glb`, (gltf) => {
+    gltf.scene.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+
+    // 중심축(Pivot) 정합 보정: 모델의 bottom-center를 (0,0,0)에 정렬
+    gltf.scene.position.set(-center.x, -box.min.y, -center.z);
+
+    const container = new THREE.Group();
+    container.add(gltf.scene);
+
+    const width = 25 + Math.random() * 15;
+    const xScale = width / size.x;
+    const zScale = width / size.z;
+    const yScale = targetHeight / size.y;
+    container.scale.set(xScale, yScale, zScale);
+
+    container.rotation.y = (Math.floor(Math.random() * 4) * Math.PI) / 2;
+    container.position.set(x, 0, z);
+    container.visible = params.gravityPreset === '지구';
+    scene.add(container);
+    backgroundBuildings.push(container);
+
+    if (Math.random() < 0.35) {
+      const detailTypes = [
+        'detail-parasol-a',
+        'detail-parasol-b',
+        'detail-awning',
+        'detail-awning-wide',
+        'detail-overhang',
+        'detail-overhang-wide',
+      ];
+      const randomDetail = detailTypes[Math.floor(Math.random() * detailTypes.length)];
+      const offset = width / 2 + 5 + Math.random() * 5;
+      const angle = Math.random() * Math.PI * 2;
+      const dx = x + Math.cos(angle) * offset;
+      const dz = z + Math.sin(angle) * offset;
+      spawnDetailAsset(randomDetail, dx, dz, 8.0 + Math.random() * 4.0);
+    }
+  });
+}
+
 function buildCity() {
   const textureLoader = new THREE.TextureLoader();
 
@@ -278,7 +375,42 @@ function buildCity() {
     .setFriction(0.9);
   physicsWorld.createCollider(groundColliderDesc, groundBody);
 
-  // 빌딩 생성 및 텍스처 매핑 (기존 코드 유지)
+  // ★ 3. 빌딩 생성
+  // 사방 1500m 영역에 100m 크기의 셀 총 900개(30x30 격자) 배치
+  const cellSize = 100;
+  const halfRange = 1500;
+  const columns = Math.floor((halfRange * 2) / cellSize); // 30열
+  const rows = Math.floor((halfRange * 2) / cellSize); // 30행
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < columns; c++) {
+      const baseX = -halfRange + c * cellSize + cellSize / 2;
+      const baseZ = -halfRange + r * cellSize + cellSize / 2;
+
+      // [안전 낙하 구역] 캐릭터 스폰 및 낙하 전면 궤적 구역(X -70~70, Z -70~150) 제외
+      if (baseX >= -70 && baseX <= 70 && baseZ >= -70 && baseZ <= 150) {
+        continue;
+      }
+
+      // [구역별 밀도 조절] Z < -100인 뒤쪽 영역은 65% 고밀도로, 앞쪽 및 옆쪽 영역은 20%로 분산
+      const isBackZone = baseZ < -100;
+      const spawnProbability = isBackZone ? 0.65 : 0.2;
+      if (Math.random() > spawnProbability) continue;
+
+      // 100m 셀 크기 내에서 절대 겹치지 않도록 최대 +-20m 한도로 랜덤 위치 보정
+      const bx = baseX + (Math.random() - 0.5) * 20;
+      const bz = baseZ + (Math.random() - 0.5) * 20;
+
+      const randomModel = buildingModelTypes[Math.floor(Math.random() * buildingModelTypes.length)];
+
+      const heightMultiplier = 1.0;
+      const randomHeight = (30 + Math.random() * 85) * heightMultiplier;
+
+      spawnBackgroundSkyscraper(randomModel, bx, bz, randomHeight);
+    }
+  }
+
+  // ★ 4. 메인 빌딩 생성 및 텍스처 매핑
   buildingTexture = textureLoader.load('./assets/textures/building_window.jpg', (texture) => {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
@@ -366,6 +498,11 @@ function initGUI() {
     .name('중력 환경')
     .onChange((v) => {
       physicsWorld.gravity = { x: 0, y: GRAVITY_PRESETS[v], z: 0 };
+
+      const showBuildings = v === '지구';
+      backgroundBuildings.forEach((b) => {
+        if (b) b.visible = showBuildings;
+      });
 
       // 중력 환경이 '달'인 경우 달 지면 및 우주 배경으로 변경
       if (v === '달') {
