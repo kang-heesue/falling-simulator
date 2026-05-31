@@ -20,6 +20,8 @@ let groundMesh = null;
 let groundBody = null;
 let seaMesh = null;
 
+// 지면 텍스처 및 재질 관리를 위한 전역 변수
+let groundMaterial = null;
 let cityTileTexture = null; 
 let moonTexture = null;
 let skyTexture = null;
@@ -28,12 +30,25 @@ let spaceTexture = null;
 const gltfLoader = new GLTFLoader();
 const backgroundBuildings = [];
 const buildingModelTypes = [
-  'building-a', 'building-b', 'building-c', 'building-d',
-  'building-e', 'building-f', 'building-g', 'building-h',
-  'building-i', 'building-j', 'building-k', 'building-l',
-  'building-m', 'building-n', 'building-skyscraper-a',
-  'building-skyscraper-b', 'building-skyscraper-c',
-  'building-skyscraper-d', 'building-skyscraper-e',
+  'building-a',
+  'building-b',
+  'building-c',
+  'building-d',
+  'building-e',
+  'building-f',
+  'building-g',
+  'building-h',
+  'building-i',
+  'building-j',
+  'building-k',
+  'building-l',
+  'building-m',
+  'building-n',
+  'building-skyscraper-a',
+  'building-skyscraper-b',
+  'building-skyscraper-c',
+  'building-skyscraper-d',
+  'building-skyscraper-e',
 ];
 
 let characterModel = null;
@@ -52,7 +67,7 @@ let parachuteMesh = null;
 let isParachuteDeployed = false;
 
 // 고정 물리 타임스텝 변수
-const timeStep = 1 / 60; 
+const timeStep = 1 / 60;
 let physicsAccumulator = 0;
 
 const lastVelocity = new THREE.Vector3();
@@ -68,7 +83,14 @@ let currentRotationAngle = 0;
 const actions = [];
 let actionIndex = 0;
 
-const keys = { forward: false, backward: false, left: false, right: false };
+const keys = {
+  forward: false,
+  backward: false,
+  left: false,
+  right: false,
+};
+
+// 공중 제어력(Air Control) 계수 설정
 const AIR_CONTROL_FACTOR = 0.35; 
 
 const uiDisplay = document.createElement('div');
@@ -288,21 +310,49 @@ function spawnBackgroundSkyscraper(modelType, x, z, targetHeight) {
     container.visible = (params.mapType === '도시(City)' && params.gravityPreset === '지구');
     scene.add(container);
     backgroundBuildings.push(container);
+
+    if (Math.random() < 0.35) {
+      const detailTypes = [
+        'detail-parasol-a',
+        'detail-parasol-b',
+        'detail-awning',
+        'detail-awning-wide',
+        'detail-overhang',
+        'detail-overhang-wide',
+      ];
+      const randomDetail = detailTypes[Math.floor(Math.random() * detailTypes.length)];
+      const offset = width / 2 + 5 + Math.random() * 5;
+      const angle = Math.random() * Math.PI * 2;
+      const dx = x + Math.cos(angle) * offset;
+      const dz = z + Math.sin(angle) * offset;
+      // Note: spawnDetailAsset 함수가 구현되어 있다면 활성화
+      // spawnDetailAsset(randomDetail, dx, dz, 8.0 + Math.random() * 4.0);
+    }
   });
 }
 
 function buildMap() {
   const textureLoader = new THREE.TextureLoader();
 
-  cityTileTexture = textureLoader.load('./assets/textures/floor/city_tile.jpg', (t) => {
-    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2500, 2500); 
-  });
-  moonTexture = textureLoader.load('./assets/textures/floor/moon.jpg', (t) => {
-    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1000, 1000);
+  cityTileTexture = textureLoader.load('./assets/textures/floor/city_tile.jpg', (texture) => {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(2500, 2500);
   });
 
-  const groundMat = new THREE.MeshStandardMaterial({ map: cityTileTexture, roughness: 0.5, metalness: 0.2 });
-  groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(50000, 50000), groundMat);
+  moonTexture = textureLoader.load('./assets/textures/floor/moon.jpg', (texture) => {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1000, 1000);
+  });
+
+  groundMaterial = new THREE.MeshStandardMaterial({
+    map: params.gravityPreset === '달' ? moonTexture : cityTileTexture,
+    roughness: 0.5,
+    metalness: 0.2,
+  });
+
+  groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(50000, 50000), groundMaterial);
   groundMesh.rotation.x = -Math.PI / 2;
   groundMesh.receiveShadow = true;
   scene.add(groundMesh);
@@ -317,9 +367,18 @@ function buildMap() {
     for (let c = 0; c < cols; c++) {
       const baseX = -halfRange + c * cellSize + cellSize / 2;
       const baseZ = -halfRange + r * cellSize + cellSize / 2;
-      if (baseZ >= -100 || Math.random() > 0.65) continue;
-      const bx = baseX + (Math.random() - 0.5) * 20, bz = baseZ + (Math.random() - 0.5) * 20;
-      spawnBackgroundSkyscraper(buildingModelTypes[Math.floor(Math.random() * buildingModelTypes.length)], bx, bz, 30 + Math.random() * 85);
+
+      if (baseZ >= -100) continue;
+
+      const spawnProbability = 0.65;
+      if (Math.random() > spawnProbability) continue;
+
+      const bx = baseX + (Math.random() - 0.5) * 20;
+      const bz = baseZ + (Math.random() - 0.5) * 20;
+      const randomModel = buildingModelTypes[Math.floor(Math.random() * buildingModelTypes.length)];
+      const randomHeight = 30 + Math.random() * 85;
+
+      spawnBackgroundSkyscraper(randomModel, bx, bz, randomHeight);
     }
   }
 
@@ -368,8 +427,18 @@ function updateBuildingHeight(newHeight) {
   if (targetBuildingCollider) physicsWorld.removeCollider(targetBuildingCollider, false);
   if (targetBuildingBody) physicsWorld.removeRigidBody(targetBuildingBody);
 
-  targetBuildingBody = physicsWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, safeHeight / 2, 0));
-  targetBuildingCollider = physicsWorld.createCollider(RAPIER.ColliderDesc.cuboid(START_BUILDING_WIDTH / 2, safeHeight / 2, START_BUILDING_WIDTH / 2).setRestitution(0.1).setFriction(0.6), targetBuildingBody);
+  targetBuildingBody = physicsWorld.createRigidBody(
+    RAPIER.RigidBodyDesc.fixed().setTranslation(0, safeHeight / 2, 0),
+  );
+  const colliderDesc = RAPIER.ColliderDesc.cuboid(
+    START_BUILDING_WIDTH / 2,
+    safeHeight / 2,
+    START_BUILDING_WIDTH / 2,
+  )
+    .setRestitution(0.1)
+    .setFriction(0.6);
+  targetBuildingCollider = physicsWorld.createCollider(colliderDesc, targetBuildingBody);
+
   respawnCharacter();
 }
 
@@ -408,19 +477,33 @@ function initGUI() {
     physicsWorld.gravity = { x: 0, y: GRAVITY_PRESETS[v], z: 0 };
     if (params.mapType === '도시(City)') {
       const showBuildings = v === '지구';
-      backgroundBuildings.forEach((b) => { if (b) b.visible = showBuildings; });
+      backgroundBuildings.forEach((b) => {
+        if (b) b.visible = showBuildings;
+      });
+
+      if (v === '달') {
+        if (groundMaterial) groundMaterial.map = moonTexture;
+        if (spaceTexture) {
+          scene.background = spaceTexture;
+          scene.environment = spaceTexture;
+        }
+        if (scene.fog) scene.fog.color.setHex(0x000000);
+      } else {
+        if (groundMaterial) groundMaterial.map = cityTileTexture;
+        if (skyTexture) {
+          scene.background = skyTexture;
+          scene.environment = skyTexture;
+        }
+        if (scene.fog) scene.fog.color.setHex(0xff9e80);
+      }
+
+      if (groundMaterial) groundMaterial.needsUpdate = true;
+      setTimeout(() => {
+        if (document.activeElement) {
+          document.activeElement.blur();
+        }
+      }, 50);
     }
-    if (v === '달') {
-      groundMesh.map = moonTexture;
-      scene.background = scene.environment = spaceTexture;
-      if (scene.fog) scene.fog.color.setHex(0x000000);
-    } else {
-      groundMesh.map = cityTileTexture;
-      scene.background = scene.environment = skyTexture;
-      if (scene.fog) scene.fog.color.setHex(0xff9e80);
-    }
-    groundMesh.material.needsUpdate = true;
-    if (document.activeElement) document.activeElement.blur();
   });
 }
 
@@ -481,19 +564,32 @@ async function loadAnimations() {
       actions[6].name = 'Swimming';
     } catch (e) { console.warn('swimming.fbx 로드 실패'); }
 
+    // ★ 믹서의 finished 이벤트를 등록하여 FallLive 모션 완료 시 안전하게 Idle 상태로 즉시 복귀시킵니다.
+    // ★ 수정: 이름(getClip().name) 비교가 아닌 액션 객체 자체를 비교하고, 사망 상태가 아닐 때만 발동
     mixer.addEventListener('finished', (e) => {
       if (e.action === actions[4] && !isDead) {
         isRecovering = false;
-        const finalImpulse = Math.max(lastImpulseValue, Math.abs(lastVelocity.y) * params.characterMass);
+
+        const finalImpulse = Math.max(
+          lastImpulseValue,
+          Math.abs(lastVelocity.y) * params.characterMass,
+        );
+
         uiDisplay.innerHTML = `💥 마지막 충격량: ${finalImpulse.toFixed(1)} N·s<br>상태: 회복 완료 (지상 이동 가능)`;
         actions[4].stop();
-        if (actions[0]) { actions[0].reset().fadeIn(0.15).play(); actionIndex = 0; }
+
+        // 초기 리스폰 상태인 Idle 모션으로 교체 및 부드러운 전환
+        if (actions[0]) {
+          actions[0].reset().fadeIn(0.15).play();
+          actionIndex = 0;
+        }
       }
     });
   } catch (error) {
     console.error('모델 스킨 로드 실패:', error);
   } finally {
     respawnCharacter();
+    hideLoadingScreen();
   }
 }
 
@@ -535,6 +631,11 @@ function respawnCharacter() {
   orbitControls.target.set(0, params.buildingHeight, 0);
   camera.position.set(0, params.buildingHeight + 15, 45);
   orbitControls.update();
+  setTimeout(() => {
+    if (document.activeElement) {
+      document.activeElement.blur();
+    }
+  }, 50);
 }
 
 function startJump() {
@@ -549,7 +650,13 @@ function startJump() {
   const jumpSpeed = 16.0;
   const vx = Math.sin(currentRotationAngle) * jumpSpeed;
   const vz = Math.cos(currentRotationAngle) * jumpSpeed;
+
   character.body.setLinvel({ x: vx, y: 7.5, z: vz }, true);
+  setTimeout(() => {
+    if (document.activeElement) {
+      document.activeElement.blur();
+    }
+  }, 50);
 }
 
 function handleImpact(impulseValue) {
@@ -571,8 +678,13 @@ function handleImpact(impulseValue) {
     isRecovering = true;
     uiDisplay.innerHTML = `💥 마지막 충격량: <span style="color:#55ff55;font-weight:bold;">${finalImpulse.toFixed(1)} N·s</span><br>상태: <span style="color:#55ff55;font-weight:bold;">생존 (부상 복구 중...)</span>`;
     if (actions[actionIndex]) actions[actionIndex].stop();
+
     if (actions[4]) {
-      actions[4].reset(); actions[4].setLoop(THREE.LoopOnce, 1); actions[4].clampWhenFinished = true; actions[4].play(); actionIndex = 4;
+      actions[4].reset();
+      actions[4].setLoop(THREE.LoopOnce, 1);
+      actions[4].clampWhenFinished = true;
+      actions[4].play();
+      actionIndex = 4;
     } else {
       isRecovering = false;
       if (actions[0]) { actions[0].reset().play(); actionIndex = 0; }
@@ -583,6 +695,7 @@ function handleImpact(impulseValue) {
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
+
   if (mixer) mixer.update(dt);
 
   if (params.simulationActive && physicsWorld) {
@@ -621,7 +734,7 @@ function animate() {
         if (isPhysicsImpact || isAbsoluteGroundImpact) {
           const collisionVelocity = Math.max(Math.abs(lastVelocity.y), maxFallSpeed);
           const realPhysicsImpulse = params.characterMass * collisionVelocity;
-          lastImpulseValue = realPhysicsImpulse; 
+          lastImpulseValue = realPhysicsImpulse;
           handleImpact(realPhysicsImpulse);
         }
       } else {
@@ -679,7 +792,8 @@ function animate() {
     const rot = character.body.rotation();
     const currentVel = character.body.linvel();
 
-    let moveX = 0, moveZ = 0;
+    let moveX = 0,
+      moveZ = 0;
     if (keys.forward) moveZ -= 1;
     if (keys.backward) moveZ += 1;
     if (keys.left) moveX -= 1;
@@ -700,6 +814,8 @@ function animate() {
         targetRotationAngle = Math.atan2(moveX, moveZ);
         let diff = targetRotationAngle - currentRotationAngle;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+
+        // ★ 방향 전환 보정: dt를 곱해 프레임 변동과 무관하게 항상 부드러운 속도로 회전하도록 수정
         currentRotationAngle += diff * 10.0 * dt;
 
         tempQuat.setFromAxisAngle(upAxis, currentRotationAngle);
@@ -739,7 +855,14 @@ function animate() {
           const airVz = currentVel.z + moveZ * AIR_CONTROL_FACTOR;
           const horizontalSpeed = Math.sqrt(airVx * airVx + airVz * airVz);
           if (horizontalSpeed > 16.0) {
-            character.body.setLinvel({ x: (airVx / horizontalSpeed) * 16.0, y: currentVel.y, z: (airVz / horizontalSpeed) * 16.0 }, true);
+            character.body.setLinvel(
+              {
+                x: (airVx / horizontalSpeed) * 16.0,
+                y: currentVel.y,
+                z: (airVz / horizontalSpeed) * 16.0,
+              },
+              true,
+            );
           } else {
             character.body.setLinvel({ x: airVx, y: currentVel.y, z: airVz }, true);
           }
@@ -785,10 +908,64 @@ function animate() {
     const cameraLerpFactor = 1.0 - Math.exp(-15.0 * dt); 
     orbitControls.target.lerp(character.mesh.position, cameraLerpFactor);
   }
-  
+
   orbitControls.update();
   renderer.render(scene, camera);
 }
 
+let loadingOverlay = null;
+
+function createLoadingScreen() {
+  loadingOverlay = document.createElement('div');
+  loadingOverlay.style.position = 'fixed';
+  loadingOverlay.style.top = '0';
+  loadingOverlay.style.left = '0';
+  loadingOverlay.style.width = '100%';
+  loadingOverlay.style.height = '100%';
+  loadingOverlay.style.background = '#121212';
+  loadingOverlay.style.display = 'flex';
+  loadingOverlay.style.flexDirection = 'column';
+  loadingOverlay.style.justifyContent = 'center';
+  loadingOverlay.style.alignItems = 'center';
+  loadingOverlay.style.zIndex = '9999';
+  loadingOverlay.style.transition = 'opacity 0.5s ease';
+  loadingOverlay.style.fontFamily = 'monospace';
+  loadingOverlay.style.color = '#ff9e80';
+
+  const spinner = document.createElement('div');
+  spinner.style.width = '50px';
+  spinner.style.height = '50px';
+  spinner.style.border = '5px solid rgba(255, 158, 128, 0.2)';
+  spinner.style.borderTop = '5px solid #ff9e80';
+  spinner.style.borderRadius = '50%';
+  spinner.style.marginBottom = '20px';
+  spinner.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], {
+    duration: 1000,
+    iterations: Infinity,
+  });
+
+  const text = document.createElement('div');
+  text.innerHTML = '🪂 시뮬레이터 로딩 중 ...';
+  text.style.fontSize = '18px';
+  text.style.letterSpacing = '2px';
+  text.style.textShadow = '0 0 10px rgba(255, 158, 128, 0.5)';
+
+  loadingOverlay.appendChild(spinner);
+  loadingOverlay.appendChild(text);
+  document.body.appendChild(loadingOverlay);
+}
+
+function hideLoadingScreen() {
+  if (loadingOverlay) {
+    loadingOverlay.style.opacity = '0';
+    setTimeout(() => {
+      if (loadingOverlay.parentNode) {
+        loadingOverlay.parentNode.removeChild(loadingOverlay);
+      }
+    }, 500);
+  }
+}
+
+createLoadingScreen();
 init();
 animate();
