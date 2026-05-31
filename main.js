@@ -18,7 +18,7 @@ let buildingTexture = null;
 
 // 지면 텍스처 및 재질 관리를 위한 전역 변수
 let groundMaterial = null;
-let stoneTexture = null;
+let cityTileTexture = null; 
 let moonTexture = null;
 
 // 하늘 텍스처 관리를 위한 전역 변수
@@ -29,30 +29,21 @@ let spaceTexture = null;
 const gltfLoader = new GLTFLoader();
 const backgroundBuildings = [];
 const buildingModelTypes = [
-  'building-a',
-  'building-b',
-  'building-c',
-  'building-d',
-  'building-e',
-  'building-f',
-  'building-g',
-  'building-h',
-  'building-i',
-  'building-j',
-  'building-k',
-  'building-l',
-  'building-m',
-  'building-n',
-  'building-skyscraper-a',
-  'building-skyscraper-b',
-  'building-skyscraper-c',
-  'building-skyscraper-d',
-  'building-skyscraper-e',
+  'building-a', 'building-b', 'building-c', 'building-d',
+  'building-e', 'building-f', 'building-g', 'building-h',
+  'building-i', 'building-j', 'building-k', 'building-l',
+  'building-m', 'building-n', 'building-skyscraper-a',
+  'building-skyscraper-b', 'building-skyscraper-c',
+  'building-skyscraper-d', 'building-skyscraper-e',
 ];
 
 let characterModel = null;
 let mixer = null;
 const clock = new THREE.Clock();
+
+const timeStep = 1 / 60; 
+let physicsAccumulator = 0;
+
 let isFalling = false;
 let isDead = false;
 let isRecovering = false;
@@ -64,7 +55,6 @@ const currentVelocity = new THREE.Vector3();
 let maxFallSpeed = 0;
 
 // 성능 최적화 및 부드러운 회전을 위한 객체들
-const tempVec3 = new THREE.Vector3();
 const tempQuat = new THREE.Quaternion();
 const upAxis = new THREE.Vector3(0, 1, 0);
 let targetRotationAngle = 0;
@@ -79,6 +69,9 @@ const keys = {
   left: false,
   right: false,
 };
+
+// 공중 제어력(Air Control) 계수 설정
+const AIR_CONTROL_FACTOR = 0.35; 
 
 // UI 출력을 위한 DOM 요소 생성
 const uiDisplay = document.createElement('div');
@@ -96,7 +89,9 @@ document.body.appendChild(uiDisplay);
 
 // 키보드 이벤트
 window.addEventListener('keydown', (e) => {
-  if (isDead || isRecovering || hasFallen) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+  if (isDead || isRecovering) return;
   switch (e.code) {
     case 'ArrowUp':
     case 'KeyW':
@@ -124,6 +119,8 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('keyup', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
   switch (e.code) {
     case 'ArrowUp':
     case 'KeyW':
@@ -183,21 +180,15 @@ async function init() {
 
 function initThree() {
   scene = new THREE.Scene();
-
-  // ★ 지면 가시성 확보를 위해 선형 안개(Linear Fog)로 교체
-  // 가까운 거리(10m)부터 먼 거리(2000m)까지 서서히 안개가 끼므로 아래 지면이 선명하게 청소됩니다.
   scene.fog = new THREE.Fog(0xff9e80, 10, 2000);
 
   camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 200000);
-  // ★ 시작 시 카메라 가우징 각도를 넓혀 아래 바닥이 자연스럽게 시야에 들어오도록 조정
   camera.position.set(0, params.buildingHeight + 40, 140);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-  // 시네마틱 톤 매핑 설정
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.9;
 
@@ -205,9 +196,9 @@ function initThree() {
 
   orbitControls = new OrbitControls(camera, renderer.domElement);
   orbitControls.enableDamping = true;
+  orbitControls.dampingFactor = 0.05;
   orbitControls.target.set(0, params.buildingHeight, 0);
 
-  // ★ 지면 그늘이 너무 어둡게 뭉치는 현상을 방지하기 위해 환경 조명 광량 대폭 보강
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
   scene.add(ambientLight);
 
@@ -216,7 +207,7 @@ function initThree() {
   scene.add(hemiLight);
 
   const dirLight = new THREE.DirectionalLight(0xffedd6, 1.5);
-  dirLight.position.set(1200, 300, -50); // 그림자가 너무 길어지지 않게 고도 살짝 상향
+  dirLight.position.set(1200, 300, -50);
   dirLight.castShadow = true;
   dirLight.shadow.mapSize.width = 2048;
   dirLight.shadow.mapSize.height = 2048;
@@ -244,7 +235,6 @@ function initPanoramaSkybox() {
   skyTexture = textureLoader.load('./assets/textures/skybox/sky_12_2k.jpg', (texture) => {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     texture.colorSpace = THREE.SRGBColorSpace;
-
     if (params.gravityPreset !== '달') {
       scene.background = texture;
       scene.environment = texture;
@@ -254,7 +244,6 @@ function initPanoramaSkybox() {
   spaceTexture = textureLoader.load('./assets/textures/skybox/space.jpg', (texture) => {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     texture.colorSpace = THREE.SRGBColorSpace;
-
     if (params.gravityPreset === '달') {
       scene.background = texture;
       scene.environment = texture;
@@ -301,7 +290,6 @@ function spawnBackgroundSkyscraper(modelType, x, z, targetHeight) {
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
 
-    // 중심축(Pivot) 정합 보정: 모델의 bottom-center를 (0,0,0)에 정렬
     gltf.scene.position.set(-center.x, -box.min.y, -center.z);
 
     const container = new THREE.Group();
@@ -321,12 +309,8 @@ function spawnBackgroundSkyscraper(modelType, x, z, targetHeight) {
 
     if (Math.random() < 0.35) {
       const detailTypes = [
-        'detail-parasol-a',
-        'detail-parasol-b',
-        'detail-awning',
-        'detail-awning-wide',
-        'detail-overhang',
-        'detail-overhang-wide',
+        'detail-parasol-a', 'detail-parasol-b', 'detail-awning',
+        'detail-awning-wide', 'detail-overhang', 'detail-overhang-wide',
       ];
       const randomDetail = detailTypes[Math.floor(Math.random() * detailTypes.length)];
       const offset = width / 2 + 5 + Math.random() * 5;
@@ -341,12 +325,10 @@ function spawnBackgroundSkyscraper(modelType, x, z, targetHeight) {
 function buildCity() {
   const textureLoader = new THREE.TextureLoader();
 
-  // ★ 1. 지면 텍스처 로드 및 무한 반복 설정
-  stoneTexture = textureLoader.load('./assets/textures/floor/stone.jpg', (texture) => {
+  cityTileTexture = textureLoader.load('./assets/textures/floor/city_tile.jpg', (texture) => {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
-    // 50000m의 광활한 영토이므로, 텍스처가 깨지지 않게 가로세로 2,000번 반복 바둑판 배열 지정
-    texture.repeat.set(2000, 2000);
+    texture.repeat.set(2500, 2500); 
   });
 
   moonTexture = textureLoader.load('./assets/textures/floor/moon.jpg', (texture) => {
@@ -355,21 +337,18 @@ function buildCity() {
     texture.repeat.set(1000, 1000);
   });
 
-  // ★ 2. 재질(Material)의 map 속성에 기본(돌) 바닥 매핑 및 반사율 미세 조정
   groundMaterial = new THREE.MeshStandardMaterial({
-    map: params.gravityPreset === '달' ? moonTexture : stoneTexture,
-    roughness: 0.65, // 돌 특유의 거친 느낌 유지
-    metalness: 0.15, // 노을빛이 바닥에 미세하게 반사되도록 살짝 부여
+    map: params.gravityPreset === '달' ? moonTexture : cityTileTexture,
+    roughness: 0.5, 
+    metalness: 0.2,
   });
 
-  // 지면 메쉬 생성 (돌바닥 평면)
   const groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(50000, 50000), groundMaterial);
   groundMesh.rotation.x = -Math.PI / 2;
   groundMesh.position.set(0, 0, 0);
   groundMesh.receiveShadow = true;
   scene.add(groundMesh);
 
-  // 물리 엔진 지면 바디 및 콜라이더 (기존 코드 유지)
   const groundBody = physicsWorld.createRigidBody(
     RAPIER.RigidBodyDesc.fixed().setTranslation(0, -50.0, 0),
   );
@@ -378,41 +357,30 @@ function buildCity() {
     .setFriction(0.9);
   physicsWorld.createCollider(groundColliderDesc, groundBody);
 
-  // ★ 3. 빌딩 생성
-  // 사방 1500m 영역에 100m 크기의 셀 총 900개(30x30 격자) 배치
   const cellSize = 100;
   const halfRange = 1500;
-  const columns = Math.floor((halfRange * 2) / cellSize); // 30열
-  const rows = Math.floor((halfRange * 2) / cellSize); // 30행
+  const columns = Math.floor((halfRange * 2) / cellSize);
+  const rows = Math.floor((halfRange * 2) / cellSize);
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < columns; c++) {
       const baseX = -halfRange + c * cellSize + cellSize / 2;
       const baseZ = -halfRange + r * cellSize + cellSize / 2;
 
-      // [안전 낙하 구역] 캐릭터 낙하 시야 및 양옆 궤적 공간 확보 위해 Z >= -100 영역은 빌딩 생성 제외
-      if (baseZ >= -100) {
-        continue;
-      }
+      if (baseZ >= -100) continue;
 
-      // [구역별 밀도 조절] Z < -100인 뒤쪽 영역은 65% 고밀도로 생성
       const spawnProbability = 0.65;
       if (Math.random() > spawnProbability) continue;
 
-      // 100m 셀 크기 내에서 절대 겹치지 않도록 최대 +-20m 한도로 랜덤 위치 보정
       const bx = baseX + (Math.random() - 0.5) * 20;
       const bz = baseZ + (Math.random() - 0.5) * 20;
-
       const randomModel = buildingModelTypes[Math.floor(Math.random() * buildingModelTypes.length)];
-
-      const heightMultiplier = 1.0;
-      const randomHeight = (30 + Math.random() * 85) * heightMultiplier;
+      const randomHeight = (30 + Math.random() * 85);
 
       spawnBackgroundSkyscraper(randomModel, bx, bz, randomHeight);
     }
   }
 
-  // ★ 4. 메인 빌딩 생성 및 텍스처 매핑
   buildingTexture = textureLoader.load('./assets/textures/building_window.jpg', (texture) => {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
@@ -479,6 +447,7 @@ function updateBuildingHeight(newHeight) {
     .setRestitution(0.1)
     .setFriction(0.6);
   targetBuildingCollider = physicsWorld.createCollider(colliderDesc, targetBuildingBody);
+  
   respawnCharacter();
 }
 
@@ -486,9 +455,10 @@ function initGUI() {
   const gui = new GUI();
   gui.title('시뮬레이터 조작 설정');
   gui
-    .add(params, 'buildingHeight', 0, 828, 10) // 세계 최대 빌딩 높이: 828m
+    .add(params, 'buildingHeight', 0, 828, 10)
     .name('🏢 빌딩 높이 (m)')
     .onChange((v) => updateBuildingHeight(v));
+
   gui.add(params, 'characterMass', 10, 200, 5).name('⚖️ 캐릭터 질량 (kg)');
   gui.add(params, 'dieThreshold', 500, 5000, 100).name('💥 사망 임계 충격량');
 
@@ -506,29 +476,23 @@ function initGUI() {
         if (b) b.visible = showBuildings;
       });
 
-      // 중력 환경이 '달'인 경우 달 지면 및 우주 배경으로 변경
       if (v === '달') {
         if (groundMaterial) groundMaterial.map = moonTexture;
         if (spaceTexture) {
           scene.background = spaceTexture;
           scene.environment = spaceTexture;
         }
-        // 안개 색상을 우주에 맞는 검은색으로 변경
         if (scene.fog) scene.fog.color.setHex(0x000000);
       } else {
-        if (groundMaterial) groundMaterial.map = stoneTexture;
+        if (groundMaterial) groundMaterial.map = cityTileTexture;
         if (skyTexture) {
           scene.background = skyTexture;
           scene.environment = skyTexture;
         }
-        // 안개 색상을 원래로 복원
         if (scene.fog) scene.fog.color.setHex(0xff9e80);
       }
 
       if (groundMaterial) groundMaterial.needsUpdate = true;
-      if (document.activeElement) {
-        document.activeElement.blur();
-      }
     });
 }
 
@@ -592,11 +556,33 @@ async function loadAnimations() {
       const liveObj = await loadFBX('fall_live.fbx');
       actions[4] = mixer.clipAction(liveObj.animations[0], characterModel);
       actions[4].name = 'FallLive';
-      actions[4].setLoop(THREE.LoopOnce);
+      actions[4].setLoop(THREE.LoopOnce, 1);
       actions[4].clampWhenFinished = true;
     } catch (e) {
       console.warn('fall_live.fbx 로드 실패');
     }
+
+    // ★ 믹서의 finished 이벤트를 등록하여 FallLive 모션 완료 시 안전하게 Idle 상태로 즉시 복귀시킵니다.
+// ★ 수정: 이름(getClip().name) 비교가 아닌 액션 객체 자체를 비교하고, 사망 상태가 아닐 때만 발동
+    mixer.addEventListener('finished', (e) => {
+      if (e.action === actions[4] && !isDead) {
+        isRecovering = false;
+        
+        // (이전에 hasFallen = false; 지우셨던 부분은 그대로 두거나 없으면 됩니다)
+
+        const finalImpulse = Math.max(lastImpulseValue, Math.abs(lastVelocity.y) * params.characterMass);
+        uiDisplay.innerHTML = `💥 마지막 충격량: ${finalImpulse.toFixed(1)} N·s<br>상태: 회복 완료 (지상 이동 가능)`;
+
+        actions[4].stop();
+        
+        // 초기 리스폰 상태인 Idle 모션으로 교체 및 부드러운 전환
+        if (actions[0]) {
+          actions[0].reset().fadeIn(0.15).play();
+          actionIndex = 0;
+        }
+      }
+    });
+
   } catch (error) {
     console.error('기본 모델 스킨 로드 실패:', error);
   } finally {
@@ -649,12 +635,8 @@ function respawnCharacter() {
   lastVelocity.set(0, 0, 0);
 
   orbitControls.target.set(0, params.buildingHeight, 0);
-  // ★ 스폰 시에도 카메라가 조금 더 후퇴하여 주변 지면과의 원근감을 인지할 수 있도록 보정
   camera.position.set(0, params.buildingHeight + 15, 45);
   orbitControls.update();
-  if (document.activeElement) {
-    document.activeElement.blur();
-  }
 }
 
 function startJump() {
@@ -662,7 +644,6 @@ function startJump() {
   params.simulationActive = true;
   isFalling = true;
   hasFallen = true;
-  keys.forward = keys.backward = keys.left = keys.right = false;
 
   if (actions[actionIndex]) actions[actionIndex].stop();
   if (actions[1]) {
@@ -671,18 +652,20 @@ function startJump() {
   }
 
   const jumpSpeed = 16.0;
-  // 캐릭터가 바라보는 방향으로 점프하도록 초기 속도 벡터 계산
   const vx = Math.sin(currentRotationAngle) * jumpSpeed;
   const vz = Math.cos(currentRotationAngle) * jumpSpeed;
-  character.body.setLinvel({ x: vx, y: 5.5, z: vz }, true);
-  if (document.activeElement) {
-    document.activeElement.blur();
-  }
+  
+  character.body.setLinvel({ x: vx, y: 7.5, z: vz }, true);
 }
 
 function handleImpact(impulseValue) {
+  if (isDead || isRecovering) return;
+
   isFalling = false;
   const finalImpulse = Math.max(impulseValue, Math.abs(lastVelocity.y) * params.characterMass);
+
+  character.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  character.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
   if (finalImpulse >= params.dieThreshold) {
     isDead = true;
@@ -693,31 +676,18 @@ function handleImpact(impulseValue) {
       actions[3].reset().play();
       actionIndex = 3;
     }
-    character.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
   } else {
     isRecovering = true;
     uiDisplay.innerHTML = `💥 마지막 충격량: <span style="color:#55ff55;font-weight:bold;">${finalImpulse.toFixed(1)} N·s</span><br>상태: <span style="color:#55ff55;font-weight:bold;">생존 (부상 복구 중...)</span>`;
 
-    character.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    character.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-
     if (actions[actionIndex]) actions[actionIndex].stop();
+    
     if (actions[4]) {
-      actions[4].reset().play();
+      actions[4].reset();
+      actions[4].setLoop(THREE.LoopOnce, 1); 
+      actions[4].clampWhenFinished = true;
+      actions[4].play();
       actionIndex = 4;
-
-      const duration = actions[4].getClip().duration * 1000;
-      setTimeout(() => {
-        if (!isDead && character && isRecovering) {
-          isRecovering = false;
-          uiDisplay.innerHTML = `💥 마지막 충격량: ${finalImpulse.toFixed(1)} N·s<br>상태: 초기화 완료 (조작 불가, 리스폰 필요)`;
-          if (actions[4]) actions[4].stop();
-          if (actions[0]) {
-            actions[0].reset().play();
-            actionIndex = 0;
-          }
-        }
-      }, duration);
     } else {
       isRecovering = false;
       if (actions[0]) {
@@ -728,13 +698,17 @@ function handleImpact(impulseValue) {
   }
 }
 
+let lastImpulseValue = 0; 
+
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
+  
   if (mixer) mixer.update(dt);
 
   if (params.simulationActive && physicsWorld) {
-    physicsWorld.timestep = dt;
+    // 1. 고정 타임스텝을 위한 누적기에 프레임 시간(dt) 추가
+    physicsAccumulator += dt;
 
     if (character && isFalling) {
       const v = character.body.linvel();
@@ -746,19 +720,26 @@ function animate() {
       }
     }
 
-    physicsWorld.step();
+    // 2. 누적된 시간이 1/60초(timeStep)를 넘을 때마다 고정된 간격으로 물리 연산 실행 (지터링 해결의 핵심)
+    while (physicsAccumulator >= timeStep) {
+      physicsWorld.step();
+      physicsAccumulator -= timeStep;
+    }
 
-    if (character && isFalling) {
+    // 3. 충돌 감지 가드 로직
+    if (character && isFalling && !isDead && !isRecovering) {
       const v = character.body.linvel();
       currentVelocity.set(v.x, v.y, v.z);
 
       const pos = character.body.translation();
       const isPhysicsImpact = lastVelocity.y < -2.0 && currentVelocity.y >= lastVelocity.y * -0.2;
-      const isAbsoluteGroundImpact = pos.y <= 1.25;
+      const isAbsoluteGroundImpact = pos.y <= 1.21;
 
       if (isPhysicsImpact || isAbsoluteGroundImpact) {
         const collisionVelocity = Math.max(Math.abs(lastVelocity.y), maxFallSpeed);
         const realPhysicsImpulse = params.characterMass * collisionVelocity;
+        
+        lastImpulseValue = realPhysicsImpulse; 
         handleImpact(realPhysicsImpulse);
       }
     }
@@ -769,66 +750,23 @@ function animate() {
     const rot = character.body.rotation();
     const currentVel = character.body.linvel();
 
-    if (params.simulationActive && physicsWorld && !isDead && !isRecovering && !hasFallen) {
-      let moveX = 0,
-        moveZ = 0;
-      if (keys.forward) moveZ -= 10;
-      if (keys.backward) moveZ += 10;
-      if (keys.left) moveX -= 10;
-      if (keys.right) moveX += 10;
+    let moveX = 0, moveZ = 0;
+    if (keys.forward) moveZ -= 1;
+    if (keys.backward) moveZ += 1;
+    if (keys.left) moveX -= 1;
+    if (keys.right) moveX += 1;
 
-      if (!isFalling) {
-        if (moveX !== 0 || moveZ !== 0) {
-          const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
-          moveX = (moveX / len) * 10;
-          moveZ = (moveZ / len) * 10;
-          character.body.setLinvel({ x: moveX, y: currentVel.y, z: moveZ }, true);
-
-          targetRotationAngle = Math.atan2(moveX, moveZ);
-          let diff = targetRotationAngle - currentRotationAngle;
-
-          diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-          currentRotationAngle += diff * 0.2;
-
-          tempQuat.setFromAxisAngle(upAxis, currentRotationAngle);
-          character.body.setRotation(
-            { x: tempQuat.x, y: tempQuat.y, z: tempQuat.z, w: tempQuat.w },
-            true,
-          );
-
-          if (actions[2]) {
-            const horizontalSpeed = Math.sqrt(
-              currentVel.x * currentVel.x + currentVel.z * currentVel.z,
-            );
-            actions[2].timeScale = horizontalSpeed / 10.0;
-          }
-          if (actionIndex !== 2 && actions[2]) {
-            if (actions[actionIndex]) actions[actionIndex].fadeOut(0.15);
-            actions[2].reset().fadeIn(0.15).play();
-            actionIndex = 2;
-          }
-        } else {
-          character.body.setLinvel({ x: 0, y: currentVel.y, z: 0 }, true);
-          if (actionIndex !== 0 && actions[0]) {
-            if (actions[actionIndex]) actions[actionIndex].fadeOut(0.15);
-            actions[0].reset().fadeIn(0.15).play();
-            actionIndex = 0;
-          }
-        }
-      }
-    }
-
+    // 실족/추락 감지 원천 차단
     if (
       params.simulationActive &&
       !isFalling &&
       !hasFallen &&
-      pos.y < params.buildingHeight - 0.8
+      pos.y < params.buildingHeight - 0.5
     ) {
       isFalling = true;
       hasFallen = true;
 
-      keys.forward = keys.backward = keys.left = keys.right = false;
-      character.body.setLinvel({ x: 0, y: currentVel.y, z: 0 }, true);
+      character.body.setLinvel({ x: currentVel.x, y: currentVel.y, z: currentVel.z }, true);
 
       if (actions[actionIndex]) actions[actionIndex].stop();
       if (actions[1]) {
@@ -837,16 +775,72 @@ function animate() {
       }
     }
 
+    // --- 캐릭터 상태 및 입력 처리 조건 분기 ---
+    if (params.simulationActive && physicsWorld && !isDead && !isRecovering) {
+      if (moveX !== 0 || moveZ !== 0) {
+        const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
+        moveX /= len;
+        moveZ /= len;
+
+        targetRotationAngle = Math.atan2(moveX, moveZ);
+        let diff = targetRotationAngle - currentRotationAngle;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        
+        // ★ 방향 전환 보정: dt를 곱해 프레임 변동과 무관하게 항상 부드러운 속도로 회전하도록 수정
+        currentRotationAngle += diff * 10.0 * dt;
+
+        tempQuat.setFromAxisAngle(upAxis, currentRotationAngle);
+        character.body.setRotation(
+          { x: tempQuat.x, y: tempQuat.y, z: tempQuat.z, w: tempQuat.w },
+          true,
+        );
+
+        if (!isFalling) {
+          character.body.setLinvel({ x: moveX * 10, y: currentVel.y, z: moveZ * 10 }, true);
+
+          if (actions[2]) {
+            actions[2].timeScale = 1.2;
+          }
+          if (actionIndex !== 2 && actions[2]) {
+            if (actions[actionIndex]) actions[actionIndex].fadeOut(0.15);
+            actions[2].reset().fadeIn(0.15).play();
+            actionIndex = 2;
+          }
+        } else {
+          const airVx = currentVel.x + moveX * AIR_CONTROL_FACTOR;
+          const airVz = currentVel.z + moveZ * AIR_CONTROL_FACTOR;
+
+          const horizontalSpeed = Math.sqrt(airVx * airVx + airVz * airVz);
+          if (horizontalSpeed > 16.0) {
+            character.body.setLinvel({ x: (airVx / horizontalSpeed) * 16.0, y: currentVel.y, z: (airVz / horizontalSpeed) * 16.0 }, true);
+          } else {
+            character.body.setLinvel({ x: airVx, y: currentVel.y, z: airVz }, true);
+          }
+        }
+      } else {
+        if (!isFalling) {
+          character.body.setLinvel({ x: 0, y: currentVel.y, z: 0 }, true);
+          if (actionIndex !== 0 && actions[0]) {
+            if (actions[actionIndex]) actions[actionIndex].fadeOut(0.15);
+            actions[0].reset().fadeIn(0.15).play();
+            actionIndex = 0;
+          }
+        }
+      }
+    } else if (isRecovering) {
+      // 부상 복구 상태 중에는 미끄러짐 방지를 위해 속도를 강제로 완전 고정합니다.
+      character.body.setLinvel({ x: 0, y: currentVel.y, z: 0 }, true);
+      character.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
+
+    // 물리 바디 데이터를 매 프레임 Three.js Mesh 공간으로 동기화
     const renderY = Math.max(pos.y, 1.2) - 1.2;
     character.mesh.position.set(pos.x, renderY, pos.z);
     character.mesh.quaternion.set(rot.x, rot.y, rot.z, rot.w);
 
-    // ★ 카메라 추적 보간 로직 고도화
-    // 캐릭터가 땅에 가까워지면 카메라도 지면 쪽을 비출 수 있도록 유연하게 타깃이 변합니다.
-    tempVec3.set(pos.x, pos.y + 10, pos.z + 30);
-    camera.position.lerp(tempVec3, 0.05);
-    orbitControls.target.set(pos.x, pos.y, pos.z);
+    orbitControls.target.copy(character.mesh.position);
   }
+  
   orbitControls.update();
   renderer.render(scene, camera);
 }
