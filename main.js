@@ -718,7 +718,7 @@ async function loadAnimations() {
     }
 
     try {
-      const swimObj = await loadFBX('swimming.fbx');
+      const swimObj = await loadFBX('Swimming.fbx');
       const swimClip = swimObj.animations[0];
       swimClip.tracks = swimClip.tracks.filter((track) => !track.name.includes('position'));
       actions[6] = mixer.clipAction(swimClip, characterModel);
