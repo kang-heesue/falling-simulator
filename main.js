@@ -586,7 +586,7 @@ function initGUI() {
 
   gui
     .add(params, 'gravityPreset', Object.keys(GRAVITY_PRESETS))
-    .name('중력 환경')
+    .name('🪐 중력 환경')
     .onChange((v) => {
       physicsWorld.gravity = { x: 0, y: GRAVITY_PRESETS[v], z: 0 };
       if (params.mapType === '도시(City)') {
