@@ -22,8 +22,10 @@ let seaMesh = null;
 
 // 지면 텍스처 및 재질 관리를 위한 전역 변수
 let groundMaterial = null;
-let cityTileTexture = null; 
+let cityTileTexture = null;
 let moonTexture = null;
+let marsTexture = null;
+let jupiterTexture = null;
 let skyTexture = null;
 let spaceTexture = null;
 
@@ -73,7 +75,7 @@ let physicsAccumulator = 0;
 const lastVelocity = new THREE.Vector3();
 const currentVelocity = new THREE.Vector3();
 let maxFallSpeed = 0;
-let lastImpulseValue = 0; 
+let lastImpulseValue = 0;
 
 const tempQuat = new THREE.Quaternion();
 const upAxis = new THREE.Vector3(0, 1, 0);
@@ -91,7 +93,7 @@ const keys = {
 };
 
 // 공중 제어력(Air Control) 계수 설정
-const AIR_CONTROL_FACTOR = 0.35; 
+const AIR_CONTROL_FACTOR = 0.35;
 
 const uiDisplay = document.createElement('div');
 uiDisplay.style.position = 'absolute';
@@ -111,14 +113,32 @@ window.addEventListener('keydown', (e) => {
   if (isDead || isRecovering) return;
 
   switch (e.code) {
-    case 'ArrowUp': case 'KeyW': keys.forward = true; break;
-    case 'ArrowDown': case 'KeyS': keys.backward = true; break;
-    case 'ArrowLeft': case 'KeyA': keys.left = true; break;
-    case 'ArrowRight': case 'KeyD': keys.right = true; break;
+    case 'ArrowUp':
+    case 'KeyW':
+      keys.forward = true;
+      break;
+    case 'ArrowDown':
+    case 'KeyS':
+      keys.backward = true;
+      break;
+    case 'ArrowLeft':
+    case 'KeyA':
+      keys.left = true;
+      break;
+    case 'ArrowRight':
+    case 'KeyD':
+      keys.right = true;
+      break;
     case 'Space':
       if (!isFalling && !inWater) {
         startJump();
-      } else if (params.tool === '낙하산(Parachute)' && !isParachuteDeployed && !isDead && !isRecovering && !inWater) {
+      } else if (
+        params.tool === '낙하산(Parachute)' &&
+        !isParachuteDeployed &&
+        !isDead &&
+        !isRecovering &&
+        !inWater
+      ) {
         deployParachute();
       }
       break;
@@ -131,10 +151,22 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   switch (e.code) {
-    case 'ArrowUp': case 'KeyW': keys.forward = false; break;
-    case 'ArrowDown': case 'KeyS': keys.backward = false; break;
-    case 'ArrowLeft': case 'KeyA': keys.left = false; break;
-    case 'ArrowRight': case 'KeyD': keys.right = false; break;
+    case 'ArrowUp':
+    case 'KeyW':
+      keys.forward = false;
+      break;
+    case 'ArrowDown':
+    case 'KeyS':
+      keys.backward = false;
+      break;
+    case 'ArrowLeft':
+    case 'KeyA':
+      keys.left = false;
+      break;
+    case 'ArrowRight':
+    case 'KeyD':
+      keys.right = false;
+      break;
   }
 });
 
@@ -149,8 +181,12 @@ const params = {
   simulationActive: false,
   characterMass: 70,
   dieThreshold: 2500,
-  jump: function () { startJump(); },
-  respawn: function () { respawnCharacter(); },
+  jump: function () {
+    startJump();
+  },
+  respawn: function () {
+    respawnCharacter();
+  },
 };
 
 const GRAVITY_PRESETS = { 무중력: 0, 달: -1.62, 화성: -3.71, 지구: -9.81, 목성: -24.79 };
@@ -189,7 +225,7 @@ function initThree() {
   orbitControls.target.set(0, params.buildingHeight, 0);
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-  
+
   const hemiLight = new THREE.HemisphereLight(0x6c4d85, 0xff8a69, 0.8);
   hemiLight.position.set(0, 500, 0);
   scene.add(hemiLight);
@@ -202,8 +238,10 @@ function initThree() {
   dirLight.shadow.camera.near = 0.5;
   dirLight.shadow.camera.far = 400000;
   const d = 500;
-  dirLight.shadow.camera.left = -d; dirLight.shadow.camera.right = d;
-  dirLight.shadow.camera.top = d; dirLight.shadow.camera.bottom = -d;
+  dirLight.shadow.camera.left = -d;
+  dirLight.shadow.camera.right = d;
+  dirLight.shadow.camera.top = d;
+  dirLight.shadow.camera.bottom = -d;
   scene.add(dirLight);
 
   initPanoramaSkybox();
@@ -220,55 +258,70 @@ function initPanoramaSkybox() {
   skyTexture = textureLoader.load('./assets/textures/skybox/sky_12_2k.jpg', (texture) => {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     texture.colorSpace = THREE.SRGBColorSpace;
-    if (params.gravityPreset !== '달') { scene.background = texture; scene.environment = texture; }
+    if (params.gravityPreset !== '달') {
+      scene.background = texture;
+      scene.environment = texture;
+    }
   });
   spaceTexture = textureLoader.load('./assets/textures/skybox/space.jpg', (texture) => {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     texture.colorSpace = THREE.SRGBColorSpace;
-    if (params.gravityPreset === '달') { scene.background = texture; scene.environment = texture; }
+    if (params.gravityPreset === '달') {
+      scene.background = texture;
+      scene.environment = texture;
+    }
   });
 }
 
 function createParachuteTexture() {
   const canvas = document.createElement('canvas');
-  canvas.width = 512; canvas.height = 8;
+  canvas.width = 512;
+  canvas.height = 8;
   const context = canvas.getContext('2d');
-  const segments = 16; 
+  const segments = 16;
   const segmentWidth = canvas.width / segments;
   for (let i = 0; i < segments; i++) {
     context.fillStyle = i % 2 === 0 ? '#e74c3c' : '#f0f0f0';
     context.fillRect(i * segmentWidth, 0, segmentWidth, canvas.height);
   }
   const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
 
 function initParachute() {
   parachuteMesh = new THREE.Group();
-  
-  const PARACHUTE_SCALE = 40; 
-  const CANOPY_RADIUS = 3.5; 
-  const CANOPY_HEIGHT = 7.0; 
+
+  const PARACHUTE_SCALE = 40;
+  const CANOPY_RADIUS = 3.5;
+  const CANOPY_HEIGHT = 7.0;
   const STRING_ATTACH_Y = 1.8;
 
   parachuteMesh.scale.set(PARACHUTE_SCALE, PARACHUTE_SCALE, PARACHUTE_SCALE);
   const parachuteTex = createParachuteTexture();
   const canopyGeo = new THREE.SphereGeometry(CANOPY_RADIUS, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-  const canopyMat = new THREE.MeshStandardMaterial({ map: parachuteTex, side: THREE.DoubleSide, roughness: 0.8 });
+  const canopyMat = new THREE.MeshStandardMaterial({
+    map: parachuteTex,
+    side: THREE.DoubleSide,
+    roughness: 0.8,
+  });
   const canopy = new THREE.Mesh(canopyGeo, canopyMat);
   canopy.position.y = CANOPY_HEIGHT;
   canopy.castShadow = true;
   parachuteMesh.add(canopy);
 
   const lineMat = new THREE.LineBasicMaterial({ color: 0xcccccc });
-  const stringCount = 16; 
+  const stringCount = 16;
   for (let i = 0; i < stringCount; i++) {
     const angle = (i / stringCount) * Math.PI * 2;
     const x = Math.cos(angle) * CANOPY_RADIUS;
     const z = Math.sin(angle) * CANOPY_RADIUS;
-    const points = [new THREE.Vector3(x, CANOPY_HEIGHT, z), new THREE.Vector3(0, STRING_ATTACH_Y, 0)];
+    const points = [
+      new THREE.Vector3(x, CANOPY_HEIGHT, z),
+      new THREE.Vector3(0, STRING_ATTACH_Y, 0),
+    ];
     parachuteMesh.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), lineMat));
   }
 }
@@ -292,7 +345,10 @@ async function initPhysics() {
 function spawnBackgroundSkyscraper(modelType, x, z, targetHeight) {
   gltfLoader.load(`./assets/models/city/${modelType}.glb`, (gltf) => {
     gltf.scene.traverse((child) => {
-      if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
     });
     const box = new THREE.Box3().setFromObject(gltf.scene);
     const center = box.getCenter(new THREE.Vector3());
@@ -306,8 +362,8 @@ function spawnBackgroundSkyscraper(modelType, x, z, targetHeight) {
     container.scale.set(width / size.x, targetHeight / size.y, width / size.z);
     container.rotation.y = (Math.floor(Math.random() * 4) * Math.PI) / 2;
     container.position.set(x, 0, z);
-    
-    container.visible = (params.mapType === '도시(City)' && params.gravityPreset === '지구');
+
+    container.visible = params.mapType === '도시(City)' && params.gravityPreset === '지구';
     scene.add(container);
     backgroundBuildings.push(container);
 
@@ -346,8 +402,27 @@ function buildMap() {
     texture.repeat.set(1000, 1000);
   });
 
+  marsTexture = textureLoader.load('./assets/textures/floor/mars.jpg', (texture) => {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1000, 1000);
+  });
+
+  jupiterTexture = textureLoader.load('./assets/textures/floor/jupiter.jpg', (texture) => {
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1000, 1000);
+  });
+
   groundMaterial = new THREE.MeshStandardMaterial({
-    map: params.gravityPreset === '달' ? moonTexture : cityTileTexture,
+    map:
+      params.gravityPreset === '달'
+        ? moonTexture
+        : params.gravityPreset === '화성'
+          ? marsTexture
+          : params.gravityPreset === '목성'
+            ? jupiterTexture
+            : cityTileTexture,
     roughness: 0.5,
     metalness: 0.2,
   });
@@ -357,12 +432,18 @@ function buildMap() {
   groundMesh.receiveShadow = true;
   scene.add(groundMesh);
 
-  groundBody = physicsWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -50.0, 0));
-  const groundColliderDesc = RAPIER.ColliderDesc.cuboid(25000, 50.0, 25000).setRestitution(0.05).setFriction(0.9);
+  groundBody = physicsWorld.createRigidBody(
+    RAPIER.RigidBodyDesc.fixed().setTranslation(0, -50.0, 0)
+  );
+  const groundColliderDesc = RAPIER.ColliderDesc.cuboid(25000, 50.0, 25000)
+    .setRestitution(0.05)
+    .setFriction(0.9);
   physicsWorld.createCollider(groundColliderDesc, groundBody);
 
-  const cellSize = 100, halfRange = 1500;
-  const cols = Math.floor((halfRange * 2) / cellSize), rows = Math.floor((halfRange * 2) / cellSize);
+  const cellSize = 100,
+    halfRange = 1500;
+  const cols = Math.floor((halfRange * 2) / cellSize),
+    rows = Math.floor((halfRange * 2) / cellSize);
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const baseX = -halfRange + c * cellSize + cellSize / 2;
@@ -383,23 +464,24 @@ function buildMap() {
   }
 
   const seaMat = new THREE.MeshPhysicalMaterial({
-    color: 0x003344, 
+    color: 0x003344,
     metalness: 0.1,
     roughness: 0.1,
-    transmission: 0.7, 
-    ior: 1.33,         
+    transmission: 0.7,
+    ior: 1.33,
     transparent: true,
-    opacity: 0.95      
+    opacity: 0.95,
   });
   seaMesh = new THREE.Mesh(new THREE.PlaneGeometry(50000, 50000), seaMat);
   seaMesh.rotation.x = -Math.PI / 2;
-  seaMesh.position.y = 0.5; 
+  seaMesh.position.y = 0.5;
   seaMesh.receiveShadow = true;
-  seaMesh.visible = false; 
+  seaMesh.visible = false;
   scene.add(seaMesh);
 
   buildingTexture = textureLoader.load('./assets/textures/building_window.jpg', (t) => {
-    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, params.buildingHeight / 10);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(2, params.buildingHeight / 10);
   });
   const startBuildingMesh = new THREE.Mesh(
     new THREE.BoxGeometry(START_BUILDING_WIDTH, params.buildingHeight, START_BUILDING_WIDTH),
@@ -410,8 +492,19 @@ function buildMap() {
   scene.add(startBuildingMesh);
   targetBuildingMesh = startBuildingMesh;
 
-  targetBuildingBody = physicsWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, params.buildingHeight / 2, 0));
-  targetBuildingCollider = physicsWorld.createCollider(RAPIER.ColliderDesc.cuboid(START_BUILDING_WIDTH / 2, params.buildingHeight / 2, START_BUILDING_WIDTH / 2).setRestitution(0.1).setFriction(0.6), targetBuildingBody);
+  targetBuildingBody = physicsWorld.createRigidBody(
+    RAPIER.RigidBodyDesc.fixed().setTranslation(0, params.buildingHeight / 2, 0)
+  );
+  targetBuildingCollider = physicsWorld.createCollider(
+    RAPIER.ColliderDesc.cuboid(
+      START_BUILDING_WIDTH / 2,
+      params.buildingHeight / 2,
+      START_BUILDING_WIDTH / 2
+    )
+      .setRestitution(0.1)
+      .setFriction(0.6),
+    targetBuildingBody
+  );
 }
 
 function updateBuildingHeight(newHeight) {
@@ -419,21 +512,28 @@ function updateBuildingHeight(newHeight) {
   const safeHeight = newHeight <= 0 ? 0.1 : newHeight;
 
   targetBuildingMesh.geometry.dispose();
-  targetBuildingMesh.geometry = new THREE.BoxGeometry(START_BUILDING_WIDTH, safeHeight, START_BUILDING_WIDTH);
+  targetBuildingMesh.geometry = new THREE.BoxGeometry(
+    START_BUILDING_WIDTH,
+    safeHeight,
+    START_BUILDING_WIDTH
+  );
   targetBuildingMesh.position.set(0, safeHeight / 2, 0);
 
-  if (buildingTexture) { buildingTexture.repeat.set(2, safeHeight / 10); buildingTexture.needsUpdate = true; }
+  if (buildingTexture) {
+    buildingTexture.repeat.set(2, safeHeight / 10);
+    buildingTexture.needsUpdate = true;
+  }
 
   if (targetBuildingCollider) physicsWorld.removeCollider(targetBuildingCollider, false);
   if (targetBuildingBody) physicsWorld.removeRigidBody(targetBuildingBody);
 
   targetBuildingBody = physicsWorld.createRigidBody(
-    RAPIER.RigidBodyDesc.fixed().setTranslation(0, safeHeight / 2, 0),
+    RAPIER.RigidBodyDesc.fixed().setTranslation(0, safeHeight / 2, 0)
   );
   const colliderDesc = RAPIER.ColliderDesc.cuboid(
     START_BUILDING_WIDTH / 2,
     safeHeight / 2,
-    START_BUILDING_WIDTH / 2,
+    START_BUILDING_WIDTH / 2
   )
     .setRestitution(0.1)
     .setFriction(0.6);
@@ -446,70 +546,117 @@ function initGUI() {
   const gui = new GUI();
   gui.title('시뮬레이터 조작 설정');
 
-  gui.add(params, 'mapType', ['도시(City)', '바다(Sea)']).name('🗺️ 맵 선택').onChange((v) => {
-    const isCity = v === '도시(City)';
-    groundMesh.visible = isCity;
-    seaMesh.visible = !isCity;
-    
-    backgroundBuildings.forEach((b) => { if (b) b.visible = isCity && params.gravityPreset === '지구'; });
-    
-    if (groundBody) {
-      groundBody.setTranslation({ x: 0, y: isCity ? -50.0 : -200.0, z: 0 }, true);
-    }
-    
-    if (document.activeElement) document.activeElement.blur();
-    respawnCharacter();
-  });
+  gui
+    .add(params, 'mapType', ['도시(City)', '바다(Sea)'])
+    .name('🗺️ 맵 선택')
+    .onChange((v) => {
+      const isCity = v === '도시(City)';
+      groundMesh.visible = isCity;
+      seaMesh.visible = !isCity;
 
-  gui.add(params, 'buildingHeight', 0, 828, 10).name('🏢 빌딩 높이 (m)').onChange((v) => updateBuildingHeight(v));
+      backgroundBuildings.forEach((b) => {
+        if (b) b.visible = isCity && params.gravityPreset === '지구';
+      });
+
+      if (groundBody) {
+        groundBody.setTranslation({ x: 0, y: isCity ? -50.0 : -200.0, z: 0 }, true);
+      }
+
+      if (document.activeElement) document.activeElement.blur();
+      respawnCharacter();
+    });
+
+  gui
+    .add(params, 'buildingHeight', 0, 828, 10)
+    .name('🏢 빌딩 높이 (m)')
+    .onChange((v) => updateBuildingHeight(v));
   gui.add(params, 'characterMass', 10, 200, 5).name('⚖️ 캐릭터 질량 (kg)');
   gui.add(params, 'dieThreshold', 500, 5000, 100).name('💥 사망 임계 충격량');
 
   const folder = gui.addFolder('행동 제어');
   folder.add(params, 'jump').name('낙하 시작 🪂');
   folder.add(params, 'respawn').name('리스폰 🔄');
-  
-  gui.add(params, 'tool', ['없음(None)', '낙하산(Parachute)']).name('🎒 장착 도구').onChange(() => {
-    if (document.activeElement) document.activeElement.blur();
-  });
 
-  gui.add(params, 'gravityPreset', Object.keys(GRAVITY_PRESETS)).name('중력 환경').onChange((v) => {
-    physicsWorld.gravity = { x: 0, y: GRAVITY_PRESETS[v], z: 0 };
-    if (params.mapType === '도시(City)') {
-      const showBuildings = v === '지구';
-      backgroundBuildings.forEach((b) => {
-        if (b) b.visible = showBuildings;
-      });
+  gui
+    .add(params, 'tool', ['없음(None)', '낙하산(Parachute)'])
+    .name('🎒 장착 도구')
+    .onChange(() => {
+      if (document.activeElement) document.activeElement.blur();
+    });
 
-      if (v === '달') {
-        if (groundMaterial) groundMaterial.map = moonTexture;
-        if (spaceTexture) {
-          scene.background = spaceTexture;
-          scene.environment = spaceTexture;
+  gui
+    .add(params, 'gravityPreset', Object.keys(GRAVITY_PRESETS))
+    .name('중력 환경')
+    .onChange((v) => {
+      physicsWorld.gravity = { x: 0, y: GRAVITY_PRESETS[v], z: 0 };
+      if (params.mapType === '도시(City)') {
+        const showBuildings = v === '지구';
+        backgroundBuildings.forEach((b) => {
+          if (b) b.visible = showBuildings;
+        });
+
+        if (v === '달') {
+          if (groundMaterial) groundMaterial.map = moonTexture;
+          if (spaceTexture) {
+            scene.background = spaceTexture;
+            scene.environment = spaceTexture;
+          }
+          if (scene.fog) {
+            scene.fog.color.setHex(0x000000);
+            scene.fog.near = 10;
+            scene.fog.far = 3000;
+          }
+        } else if (v === '화성') {
+          if (groundMaterial) groundMaterial.map = marsTexture;
+          if (spaceTexture) {
+            scene.background = spaceTexture;
+            scene.environment = spaceTexture;
+          }
+          if (scene.fog) {
+            scene.fog.color.setHex(0x191a16);
+            scene.fog.near = 10;
+            scene.fog.far = 5000;
+          }
+        } else if (v === '목성') {
+          if (groundMaterial) groundMaterial.map = jupiterTexture;
+          if (spaceTexture) {
+            scene.background = spaceTexture;
+            scene.environment = spaceTexture;
+          }
+          if (scene.fog) {
+            scene.fog.color.setHex(0x191a16);
+            scene.fog.near = 10;
+            scene.fog.far = 5000;
+          }
+        } else {
+          if (groundMaterial) groundMaterial.map = cityTileTexture;
+          if (skyTexture) {
+            scene.background = skyTexture;
+            scene.environment = skyTexture;
+          }
+          if (scene.fog) {
+            scene.fog.color.setHex(0xff9e80);
+          }
         }
-        if (scene.fog) scene.fog.color.setHex(0x000000);
-      } else {
-        if (groundMaterial) groundMaterial.map = cityTileTexture;
-        if (skyTexture) {
-          scene.background = skyTexture;
-          scene.environment = skyTexture;
-        }
-        if (scene.fog) scene.fog.color.setHex(0xff9e80);
+
+        if (groundMaterial) groundMaterial.needsUpdate = true;
+        setTimeout(() => {
+          if (document.activeElement) {
+            document.activeElement.blur();
+          }
+        }, 50);
       }
-
-      if (groundMaterial) groundMaterial.needsUpdate = true;
-      setTimeout(() => {
-        if (document.activeElement) {
-          document.activeElement.blur();
-        }
-      }, 50);
-    }
-  });
+    });
 }
 
 function loadFBX(filename) {
   return new Promise((resolve, reject) => {
-    loader.load(filename, (obj) => resolve(obj), undefined, (err) => reject(err));
+    loader.load(
+      filename,
+      (obj) => resolve(obj),
+      undefined,
+      (err) => reject(err)
+    );
   });
 }
 
@@ -521,48 +668,64 @@ async function loadAnimations() {
     characterModel.scale.set(0.05, 0.05, 0.05);
     mixer = new THREE.AnimationMixer(characterModel);
 
-    actions[0] = mixer.clipAction(characterModel.animations[0]); actions[0].name = 'Idle'; actions[0].play();
-    characterModel.traverse((c) => { if (c.isMesh) { c.castShadow = c.receiveShadow = true; } });
+    actions[0] = mixer.clipAction(characterModel.animations[0]);
+    actions[0].name = 'Idle';
+    actions[0].play();
+    characterModel.traverse((c) => {
+      if (c.isMesh) {
+        c.castShadow = c.receiveShadow = true;
+      }
+    });
 
     try {
       const fallObj = await loadFBX('Falling.fbx');
-      actions[1] = mixer.clipAction(fallObj.animations[0], characterModel); actions[1].name = 'Falling';
+      actions[1] = mixer.clipAction(fallObj.animations[0], characterModel);
+      actions[1].name = 'Falling';
     } catch (e) {}
 
     try {
       const walkObj = await loadFBX('Walking.fbx');
       const walkClip = walkObj.animations[0];
-      walkClip.tracks = walkClip.tracks.filter(track => !track.name.includes('position'));
-      actions[2] = mixer.clipAction(walkClip, characterModel); actions[2].name = 'Walking';
+      walkClip.tracks = walkClip.tracks.filter((track) => !track.name.includes('position'));
+      actions[2] = mixer.clipAction(walkClip, characterModel);
+      actions[2].name = 'Walking';
     } catch (e) {}
 
     try {
       const dieObj = await loadFBX('fall_die.fbx');
       actions[3] = mixer.clipAction(dieObj.animations[0], characterModel);
-      actions[3].name = 'FallDie'; actions[3].setLoop(THREE.LoopOnce); actions[3].clampWhenFinished = true;
+      actions[3].name = 'FallDie';
+      actions[3].setLoop(THREE.LoopOnce);
+      actions[3].clampWhenFinished = true;
     } catch (e) {}
 
     try {
       const liveObj = await loadFBX('fall_live.fbx');
       actions[4] = mixer.clipAction(liveObj.animations[0], characterModel);
-      actions[4].name = 'FallLive'; actions[4].setLoop(THREE.LoopOnce, 1); actions[4].clampWhenFinished = true;
+      actions[4].name = 'FallLive';
+      actions[4].setLoop(THREE.LoopOnce, 1);
+      actions[4].clampWhenFinished = true;
     } catch (e) {}
 
     try {
       const waterStandObj = await loadFBX('waterstand.fbx');
       const waterClip = waterStandObj.animations[0];
-      waterClip.tracks = waterClip.tracks.filter(track => !track.name.includes('position'));
+      waterClip.tracks = waterClip.tracks.filter((track) => !track.name.includes('position'));
       actions[5] = mixer.clipAction(waterClip, characterModel);
       actions[5].name = 'WaterStand';
-    } catch (e) { console.warn('waterstand.fbx 로드 실패'); }
+    } catch (e) {
+      console.warn('waterstand.fbx 로드 실패');
+    }
 
     try {
       const swimObj = await loadFBX('swimming.fbx');
       const swimClip = swimObj.animations[0];
-      swimClip.tracks = swimClip.tracks.filter(track => !track.name.includes('position'));
+      swimClip.tracks = swimClip.tracks.filter((track) => !track.name.includes('position'));
       actions[6] = mixer.clipAction(swimClip, characterModel);
       actions[6].name = 'Swimming';
-    } catch (e) { console.warn('swimming.fbx 로드 실패'); }
+    } catch (e) {
+      console.warn('swimming.fbx 로드 실패');
+    }
 
     // ★ 믹서의 finished 이벤트를 등록하여 FallLive 모션 완료 시 안전하게 Idle 상태로 즉시 복귀시킵니다.
     // ★ 수정: 이름(getClip().name) 비교가 아닌 액션 객체 자체를 비교하고, 사망 상태가 아닐 때만 발동
@@ -572,7 +735,7 @@ async function loadAnimations() {
 
         const finalImpulse = Math.max(
           lastImpulseValue,
-          Math.abs(lastVelocity.y) * params.characterMass,
+          Math.abs(lastVelocity.y) * params.characterMass
         );
 
         uiDisplay.innerHTML = `💥 마지막 충격량: ${finalImpulse.toFixed(1)} N·s<br>상태: 회복 완료 (지상 이동 가능)`;
@@ -599,7 +762,7 @@ function respawnCharacter() {
   isDead = false;
   isRecovering = false;
   hasFallen = false;
-  inWater = false; 
+  inWater = false;
   maxFallSpeed = 0;
   keys.forward = keys.backward = keys.left = keys.right = false;
   uiDisplay.innerHTML = '💥 마지막 충격량: 0 N·s<br> 상태: 대기 중';
@@ -612,17 +775,27 @@ function respawnCharacter() {
   }
   if (!characterModel) return;
 
-  actions.forEach((a) => { if (a) a.stop(); });
-  if (actions[0]) { actions[0].reset().play(); actionIndex = 0; }
+  actions.forEach((a) => {
+    if (a) a.stop();
+  });
+  if (actions[0]) {
+    actions[0].reset().play();
+    actionIndex = 0;
+  }
 
   characterModel.position.set(0, params.buildingHeight, 0);
   currentRotationAngle = targetRotationAngle = 0;
   characterModel.rotation.set(0, 0, 0);
   scene.add(characterModel);
 
-  const bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(0, params.buildingHeight + 1.2, 0).setCcdEnabled(true).enabledRotations(false, true, false);
+  const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
+    .setTranslation(0, params.buildingHeight + 1.2, 0)
+    .setCcdEnabled(true)
+    .enabledRotations(false, true, false);
   const body = physicsWorld.createRigidBody(bodyDesc);
-  const characterColliderDesc = RAPIER.ColliderDesc.capsule(0.6, 0.6).setFriction(0.5).setRestitution(0.0);
+  const characterColliderDesc = RAPIER.ColliderDesc.capsule(0.6, 0.6)
+    .setFriction(0.5)
+    .setRestitution(0.0);
   physicsWorld.createCollider(characterColliderDesc, body);
 
   character = { mesh: characterModel, body };
@@ -645,7 +818,10 @@ function startJump() {
   hasFallen = true;
 
   if (actions[actionIndex]) actions[actionIndex].stop();
-  if (actions[1]) { actions[1].reset().play(); actionIndex = 1; }
+  if (actions[1]) {
+    actions[1].reset().play();
+    actionIndex = 1;
+  }
 
   const jumpSpeed = 16.0;
   const vx = Math.sin(currentRotationAngle) * jumpSpeed;
@@ -673,7 +849,10 @@ function handleImpact(impulseValue) {
     isDead = true;
     uiDisplay.innerHTML = `💥 마지막 충격량: <span style="color:#ff5555;font-weight:bold;">${finalImpulse.toFixed(1)} N·s</span><br>상태: <span style="color:#ff5555;font-weight:bold;">사망 (콘크리트 충돌)</span>`;
     if (actions[actionIndex]) actions[actionIndex].stop();
-    if (actions[3]) { actions[3].reset().play(); actionIndex = 3; }
+    if (actions[3]) {
+      actions[3].reset().play();
+      actionIndex = 3;
+    }
   } else {
     isRecovering = true;
     uiDisplay.innerHTML = `💥 마지막 충격량: <span style="color:#55ff55;font-weight:bold;">${finalImpulse.toFixed(1)} N·s</span><br>상태: <span style="color:#55ff55;font-weight:bold;">생존 (부상 복구 중...)</span>`;
@@ -687,7 +866,10 @@ function handleImpact(impulseValue) {
       actionIndex = 4;
     } else {
       isRecovering = false;
-      if (actions[0]) { actions[0].reset().play(); actionIndex = 0; }
+      if (actions[0]) {
+        actions[0].reset().play();
+        actionIndex = 0;
+      }
     }
   }
 }
@@ -706,14 +888,19 @@ function animate() {
       lastVelocity.set(v.x, v.y, v.z);
 
       if (isParachuteDeployed) {
-        const safeSpeed = -4.0; 
+        const safeSpeed = -4.0;
         if (v.y < safeSpeed) {
-          character.body.setLinvel({ x: v.x * 0.98, y: v.y * 0.9 + safeSpeed * 0.1, z: v.z * 0.98 }, true);
+          character.body.setLinvel(
+            { x: v.x * 0.98, y: v.y * 0.9 + safeSpeed * 0.1, z: v.z * 0.98 },
+            true
+          );
         }
         maxFallSpeed = Math.abs(character.body.linvel().y);
       } else {
         const currentSpeedY = Math.abs(v.y);
-        if (currentSpeedY > maxFallSpeed) { maxFallSpeed = currentSpeedY; }
+        if (currentSpeedY > maxFallSpeed) {
+          maxFallSpeed = currentSpeedY;
+        }
       }
     }
 
@@ -746,21 +933,24 @@ function animate() {
           const collisionVelocity = Math.max(Math.abs(lastVelocity.y), maxFallSpeed);
           const realPhysicsImpulse = params.characterMass * collisionVelocity * 0.4;
           lastImpulseValue = realPhysicsImpulse;
-          
+
           if (realPhysicsImpulse >= params.dieThreshold) {
             isDead = true;
             uiDisplay.innerHTML = `💥 수면 충돌량: <span style="color:#ff5555;font-weight:bold;">${realPhysicsImpulse.toFixed(1)} N·s</span><br>상태: <span style="color:#ff5555;font-weight:bold;">사망 (수면 타격)</span>`;
             if (actions[actionIndex]) actions[actionIndex].stop();
-            if (actions[3]) { actions[3].reset().play(); actionIndex = 3; }
+            if (actions[3]) {
+              actions[3].reset().play();
+              actionIndex = 3;
+            }
           } else {
             uiDisplay.innerHTML = `💦 퐁당! 입수 성공 (충격량: ${realPhysicsImpulse.toFixed(1)} N·s)<br>상태: 튜브 둥둥 🏊‍♂️`;
             if (actions[actionIndex]) actions[actionIndex].stop();
-            if (actions[5]) { 
-              actions[5].reset().fadeIn(0.2).play(); 
-              actionIndex = 5; 
-            } else if (actions[0]) { 
-              actions[0].reset().fadeIn(0.2).play(); 
-              actionIndex = 0; 
+            if (actions[5]) {
+              actions[5].reset().fadeIn(0.2).play();
+              actionIndex = 5;
+            } else if (actions[0]) {
+              actions[0].reset().fadeIn(0.2).play();
+              actionIndex = 0;
             }
           }
         }
@@ -770,17 +960,20 @@ function animate() {
     if (inWater && !isDead && character) {
       const v = character.body.linvel();
       const pos = character.body.translation();
-      
-      const targetWaterLevel = 0.4; 
+
+      const targetWaterLevel = 0.4;
       const depth = targetWaterLevel - pos.y;
-      
-      const buoyancy = depth > 0 ? depth * 25.0 : -5.0; 
-      
-      character.body.setLinvel({ 
-        x: v.x * 0.98, 
-        y: v.y * 0.99 + buoyancy * dt, 
-        z: v.z * 0.98 
-      }, true);
+
+      const buoyancy = depth > 0 ? depth * 25.0 : -5.0;
+
+      character.body.setLinvel(
+        {
+          x: v.x * 0.98,
+          y: v.y * 0.99 + buoyancy * dt,
+          z: v.z * 0.98,
+        },
+        true
+      );
     } else if (inWater && isDead && character) {
       const v = character.body.linvel();
       character.body.setLinvel({ x: v.x * 0.95, y: -0.5, z: v.z * 0.95 }, true);
@@ -799,17 +992,28 @@ function animate() {
     if (keys.left) moveX -= 1;
     if (keys.right) moveX += 1;
 
-    if (params.simulationActive && !isFalling && !hasFallen && !inWater && pos.y < params.buildingHeight - 0.5) {
-      isFalling = true; hasFallen = true;
+    if (
+      params.simulationActive &&
+      !isFalling &&
+      !hasFallen &&
+      !inWater &&
+      pos.y < params.buildingHeight - 0.5
+    ) {
+      isFalling = true;
+      hasFallen = true;
       character.body.setLinvel({ x: currentVel.x, y: currentVel.y, z: currentVel.z }, true);
       if (actions[actionIndex]) actions[actionIndex].stop();
-      if (actions[1]) { actions[1].reset().play(); actionIndex = 1; }
+      if (actions[1]) {
+        actions[1].reset().play();
+        actionIndex = 1;
+      }
     }
 
     if (params.simulationActive && physicsWorld && !isDead && !isRecovering) {
       if (moveX !== 0 || moveZ !== 0) {
         const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
-        moveX /= len; moveZ /= len;
+        moveX /= len;
+        moveZ /= len;
 
         targetRotationAngle = Math.atan2(moveX, moveZ);
         let diff = targetRotationAngle - currentRotationAngle;
@@ -819,19 +1023,25 @@ function animate() {
         currentRotationAngle += diff * 10.0 * dt;
 
         tempQuat.setFromAxisAngle(upAxis, currentRotationAngle);
-        character.body.setRotation({ x: tempQuat.x, y: tempQuat.y, z: tempQuat.z, w: tempQuat.w }, true);
+        character.body.setRotation(
+          { x: tempQuat.x, y: tempQuat.y, z: tempQuat.z, w: tempQuat.w },
+          true
+        );
 
         if (inWater) {
           const swimSpeed = 3.0;
           const currentV = character.body.linvel();
-          
+
           const targetX = moveX * swimSpeed;
           const targetZ = moveZ * swimSpeed;
-          character.body.setLinvel({ 
-            x: THREE.MathUtils.lerp(currentV.x, targetX, 0.05), 
-            y: currentV.y, 
-            z: THREE.MathUtils.lerp(currentV.z, targetZ, 0.05) 
-          }, true);
+          character.body.setLinvel(
+            {
+              x: THREE.MathUtils.lerp(currentV.x, targetX, 0.05),
+              y: currentV.y,
+              z: THREE.MathUtils.lerp(currentV.z, targetZ, 0.05),
+            },
+            true
+          );
 
           if (actionIndex !== 6 && actions[6]) {
             if (actions[actionIndex]) actions[actionIndex].fadeOut(0.2);
@@ -840,7 +1050,10 @@ function animate() {
           }
         } else if (!isFalling) {
           const moveSpeed = 10.0;
-          character.body.setLinvel({ x: moveX * moveSpeed, y: currentVel.y, z: moveZ * moveSpeed }, true);
+          character.body.setLinvel(
+            { x: moveX * moveSpeed, y: currentVel.y, z: moveZ * moveSpeed },
+            true
+          );
 
           if (actionIndex !== 2 && actions[2]) {
             if (actions[actionIndex]) actions[actionIndex].fadeOut(0.15);
@@ -861,7 +1074,7 @@ function animate() {
                 y: currentVel.y,
                 z: (airVz / horizontalSpeed) * 16.0,
               },
-              true,
+              true
             );
           } else {
             character.body.setLinvel({ x: airVx, y: currentVel.y, z: airVz }, true);
@@ -870,11 +1083,14 @@ function animate() {
       } else {
         if (inWater) {
           const currentV = character.body.linvel();
-          character.body.setLinvel({ 
-            x: THREE.MathUtils.lerp(currentV.x, 0, 0.05), 
-            y: currentV.y, 
-            z: THREE.MathUtils.lerp(currentV.z, 0, 0.05) 
-          }, true);
+          character.body.setLinvel(
+            {
+              x: THREE.MathUtils.lerp(currentV.x, 0, 0.05),
+              y: currentV.y,
+              z: THREE.MathUtils.lerp(currentV.z, 0, 0.05),
+            },
+            true
+          );
 
           if (actionIndex !== 5 && actions[5]) {
             if (actions[actionIndex]) actions[actionIndex].fadeOut(0.2);
@@ -895,17 +1111,17 @@ function animate() {
       character.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
 
-    const WATER_VISUAL_OFFSET = 2.8; 
+    const WATER_VISUAL_OFFSET = 2.8;
     const renderY = inWater ? pos.y - WATER_VISUAL_OFFSET : Math.max(pos.y, 1.2) - 1.2;
 
     const targetPos = new THREE.Vector3(pos.x, renderY, pos.z);
     const targetRot = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
 
-    const characterLerpFactor = 1.0 - Math.exp(-30.0 * dt); 
+    const characterLerpFactor = 1.0 - Math.exp(-30.0 * dt);
     character.mesh.position.lerp(targetPos, characterLerpFactor);
     character.mesh.quaternion.slerp(targetRot, characterLerpFactor);
 
-    const cameraLerpFactor = 1.0 - Math.exp(-15.0 * dt); 
+    const cameraLerpFactor = 1.0 - Math.exp(-15.0 * dt);
     orbitControls.target.lerp(character.mesh.position, cameraLerpFactor);
   }
 
