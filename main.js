@@ -15,6 +15,7 @@ let targetBuildingMesh = null;
 let targetBuildingCollider = null;
 let targetBuildingBody = null;
 let buildingTexture = null;
+let seaNormalTexture = null;
 
 let groundMesh = null;
 let groundBody = null;
@@ -28,6 +29,23 @@ let marsTexture = null;
 let jupiterTexture = null;
 let skyTexture = null;
 let spaceTexture = null;
+
+// 입수 메커니즘 변수
+let waterEntryVelocity = 0;   // 입수 순간의 하강 속도 (y 속도)
+let targetMaxDepth = 0;       // 충격량에 따라 도달할 최대 잠수 깊이 목표
+let entryTime = 0;            // 입수 시점의 시간 
+
+// 트램펄린 관련 전역 변수 및 제어 파라미터
+let trampolineMesh = null;
+let trampolineBody = null;
+let trampolineCollider = null;
+
+const trampolineParams = {
+  x: 0,
+  y: 2,
+  z: 0,
+  radius: 30
+};
 
 const gltfLoader = new GLTFLoader();
 const backgroundBuildings = [];
@@ -337,6 +355,74 @@ function removeParachute() {
   if (character && character.mesh && parachuteMesh) character.mesh.remove(parachuteMesh);
 }
 
+// 도구 상태 변경 처리 핸들러 (트램펄린 자원 할당 및 물리화)
+function handleToolChange(currentTool) {
+  removeTrampoline();
+
+  if (currentTool === '트램펄린(Trampoline)') {
+    const group = new THREE.Group();
+    
+    // 외곽 프레임 (동적 반지름 반영)
+    const frameGeo = new THREE.TorusGeometry(trampolineParams.radius, 1.2, 16, 100);
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x34495e, metalness: 0.8, roughness: 0.2 });
+    const frame = new THREE.Mesh(frameGeo, frameMat);
+    frame.rotation.x = Math.PI / 2;
+    group.add(frame);
+
+    // 내부 탄성 매트
+    const matGeo = new THREE.CylinderGeometry(trampolineParams.radius - 1, trampolineParams.radius - 1, 0.2, 32);
+    const matMat = new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.9 });
+    const mat = new THREE.Mesh(matGeo, matMat);
+    mat.position.y = 0.1;
+    mat.receiveShadow = true;
+    group.add(mat);
+
+    group.position.set(trampolineParams.x, trampolineParams.y, trampolineParams.z); 
+    scene.add(group);
+    trampolineMesh = group;
+
+    // Rapier 물리 고정 바디 및 실린더 콜라이더 등록 (탄성 복원 계수 부여)
+    trampolineBody = physicsWorld.createRigidBody(
+      RAPIER.RigidBodyDesc.fixed().setTranslation(trampolineParams.x, trampolineParams.y, trampolineParams.z)
+    );
+    
+    const trampolineColliderDesc = RAPIER.ColliderDesc.cylinder(0.25, trampolineParams.radius)
+      .setRestitution(1.15) 
+      .setFriction(0.8);
+      
+    trampolineCollider = physicsWorld.createCollider(trampolineColliderDesc, trampolineBody);
+  }
+}
+
+// 실시간 슬라이더 조작 시 메쉬와 물리 엔진 바디 위치 동기화
+function updateTrampolineTransform() {
+  if (trampolineMesh) {
+    trampolineMesh.position.set(trampolineParams.x, trampolineParams.y, trampolineParams.z);
+  }
+  if (trampolineBody) {
+    trampolineBody.setTranslation({ x: trampolineParams.x, y: trampolineParams.y, z: trampolineParams.z }, true);
+  }
+}
+
+// 메모리 릭(Leak) 방지를 포함한 안전한 트램펄린 제거 함수
+function removeTrampoline() {
+  if (trampolineMesh) {
+    trampolineMesh.traverse((child) => {
+      if (child.isMesh) {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+          else child.material.dispose();
+        }
+      }
+    });
+    scene.remove(trampolineMesh); 
+    trampolineMesh = null; 
+  }
+  if (trampolineCollider && physicsWorld) { physicsWorld.removeCollider(trampolineCollider, false); trampolineCollider = null; }
+  if (trampolineBody && physicsWorld) { physicsWorld.removeRigidBody(trampolineBody); trampolineBody = null; }
+}
+
 async function initPhysics() {
   await RAPIER.init();
   physicsWorld = new RAPIER.World({ x: 0, y: GRAVITY_PRESETS['지구'], z: 0 });
@@ -381,8 +467,6 @@ function spawnBackgroundSkyscraper(modelType, x, z, targetHeight) {
       const angle = Math.random() * Math.PI * 2;
       const dx = x + Math.cos(angle) * offset;
       const dz = z + Math.sin(angle) * offset;
-      // Note: spawnDetailAsset 함수가 구현되어 있다면 활성화
-      // spawnDetailAsset(randomDetail, dx, dz, 8.0 + Math.random() * 4.0);
     }
   });
 }
@@ -558,8 +642,9 @@ function initGUI() {
         if (b) b.visible = isCity && params.gravityPreset === '지구';
       });
 
+      // 바다 모드일 때 투이지면(Ground Body) 충돌 박스를 낮추어 캐릭터가 중간에 걸리지 않도록 수정
       if (groundBody) {
-        groundBody.setTranslation({ x: 0, y: isCity ? -50.0 : -200.0, z: 0 }, true);
+        groundBody.setTranslation({ x: 0, y: isCity ? -50.0 : -500.0, z: 0 }, true);
       }
 
       if (document.activeElement) document.activeElement.blur();
@@ -578,11 +663,22 @@ function initGUI() {
   folder.add(params, 'respawn').name('리스폰 🔄');
 
   gui
-    .add(params, 'tool', ['없음(None)', '낙하산(Parachute)'])
+    .add(params, 'tool', ['없음(None)', '낙하산(Parachute)', '트램펄린(Trampoline)'])
     .name('🎒 장착 도구')
-    .onChange(() => {
+    .onChange((v) => {
+      handleToolChange(v);
       if (document.activeElement) document.activeElement.blur();
     });
+
+  // 트램펄린 좌표 및 변형 슬라이더 조작 전용 GUI 폴더 세그먼트 연동
+  const folderTramp = gui.addFolder('트램펄린 설정 (실시간)');
+  folderTramp.add(trampolineParams, 'x', -50, 50, 1).name('위치 X').onChange(updateTrampolineTransform);
+  folderTramp.add(trampolineParams, 'y', 0, 30, 0.5).name('위치 Y').onChange(updateTrampolineTransform);
+  folderTramp.add(trampolineParams, 'z', -50, 50, 1).name('위치 Z').onChange(updateTrampolineTransform);
+  folderTramp.add(trampolineParams, 'radius', 5, 50, 1).name('반경 (Radius)').onChange(() => {
+    if (params.tool === '트램펄린(Trampoline)') handleToolChange('트램펄린(Trampoline)');
+  });
+  folderTramp.close();
 
   gui
     .add(params, 'gravityPreset', Object.keys(GRAVITY_PRESETS))
@@ -727,8 +823,6 @@ async function loadAnimations() {
       console.warn('swimming.fbx 로드 실패');
     }
 
-    // ★ 믹서의 finished 이벤트를 등록하여 FallLive 모션 완료 시 안전하게 Idle 상태로 즉시 복귀시킵니다.
-    // ★ 수정: 이름(getClip().name) 비교가 아닌 액션 객체 자체를 비교하고, 사망 상태가 아닐 때만 발동
     mixer.addEventListener('finished', (e) => {
       if (e.action === actions[4] && !isDead) {
         isRecovering = false;
@@ -741,7 +835,6 @@ async function loadAnimations() {
         uiDisplay.innerHTML = `💥 마지막 충격량: ${finalImpulse.toFixed(1)} N·s<br>상태: 회복 완료 (지상 이동 가능)`;
         actions[4].stop();
 
-        // 초기 리스폰 상태인 Idle 모션으로 교체 및 부드러운 전환
         if (actions[0]) {
           actions[0].reset().fadeIn(0.15).play();
           actionIndex = 0;
@@ -768,6 +861,7 @@ function respawnCharacter() {
   uiDisplay.innerHTML = '💥 마지막 충격량: 0 N·s<br> 상태: 대기 중';
 
   removeParachute();
+  handleToolChange(params.tool); // 리스폰 시 트램펄린 포함 현재 도구 정합성 유지
 
   if (character) {
     scene.remove(character.mesh);
@@ -916,15 +1010,58 @@ function animate() {
       const isSea = params.mapType === '바다(Sea)';
 
       if (!isSea) {
-        const isPhysicsImpact = lastVelocity.y < -2.0 && currentVelocity.y >= lastVelocity.y * -0.2;
-        const isAbsoluteGroundImpact = pos.y <= 1.21;
-        if (isPhysicsImpact || isAbsoluteGroundImpact) {
-          const collisionVelocity = Math.max(Math.abs(lastVelocity.y), maxFallSpeed);
-          const realPhysicsImpulse = params.characterMass * collisionVelocity;
-          lastImpulseValue = realPhysicsImpulse;
-          handleImpact(realPhysicsImpulse);
+        // 실시간 트램펄린 Y 좌표 매칭 기반 다중 바운싱 충격 감쇄 처리 로직
+        const trampY = trampolineParams.y;
+        if (params.tool === '트램펄린(Trampoline)' && pos.y > (trampY - 0.2) && pos.y < (trampY + 3.0)) {
+          
+          // 낙하 중 매트를 디디며 위 방향으로 리바운드 된 정밀 타이밍 캐치
+          if (currentVelocity.y > 0.5 && lastVelocity.y < -1.0) {
+            const impactVelocity = Math.abs(lastVelocity.y);
+            const realPhysicsImpulse = params.characterMass * impactVelocity;
+            
+            // 실제 천막 및 스프링 탄성 제어로 충격 완화 (15% 수준 감쇄 흡수)
+            const mitigatedImpulse = realPhysicsImpulse * 0.15; 
+            lastImpulseValue = mitigatedImpulse;
+            maxFallSpeed = 0; 
+
+            // 완화 충격량이 임계치를 초과할 시 스프링/천막 파손 사망 판정
+            if (mitigatedImpulse >= params.dieThreshold) {
+              isDead = true;
+              uiDisplay.innerHTML = `💥 트램펄린 파손! 임계 초과: <span style="color:#ff5555;font-weight:bold;">${mitigatedImpulse.toFixed(1)} N·s</span><br>상태: <span style="color:#ff5555;font-weight:bold;">사망 (초고도 직격 충돌)</span>`;
+              if (actions[actionIndex]) actions[actionIndex].stop();
+              if (actions[3]) { actions[3].reset().play(); actionIndex = 3; }
+              character.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+            } 
+            // 안전 규격 속도(초속 4m) 이하 진입 시 최종 착지 처리
+            else if (impactVelocity < 4.0) {
+              isFalling = false;
+              hasFallen = false;
+              character.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+              uiDisplay.innerHTML = `✅ 안전 안착 성공! (최종 충격량: ${mitigatedImpulse.toFixed(1)} N·s)<br>상태: 트램펄린 위 대기`;
+              if (actions[actionIndex]) actions[actionIndex].stop();
+              if (actions[0]) { actions[0].reset().fadeIn(0.15).play(); actionIndex = 0; }
+            } 
+            // 감쇄 진동 주기 왕복 상승구간 애니메이션 가동
+            else {
+              uiDisplay.innerHTML = `🚀 감쇄 리바운드 탄성 감속 중! (완화 충격량: ${mitigatedImpulse.toFixed(1)} N·s)<br>상태: 공중 재상승 (진동 하강속도: ${impactVelocity.toFixed(1)} m/s)`;
+              if (actions[actionIndex]) actions[actionIndex].stop();
+              if (actions[1]) { actions[1].reset().play(); actionIndex = 1; }
+              isFalling = true;
+            }
+          }
+        } else {
+          // 대지 표면 하드 임팩트 충돌 판정 레이어
+          const isPhysicsImpact = lastVelocity.y < -2.0 && currentVelocity.y >= lastVelocity.y * -0.2;
+          const isAbsoluteGroundImpact = pos.y <= 1.21;
+          if (isPhysicsImpact || isAbsoluteGroundImpact) {
+            const collisionVelocity = Math.max(Math.abs(lastVelocity.y), maxFallSpeed);
+            const realPhysicsImpulse = params.characterMass * collisionVelocity;
+            lastImpulseValue = realPhysicsImpulse;
+            handleImpact(realPhysicsImpulse);
+          }
         }
       } else {
+        // 바다(Sea) 입수 및 유체 역학 프로젝션 처리
         if (pos.y <= 1.2 && !inWater) {
           inWater = true;
           isFalling = false;
@@ -933,6 +1070,9 @@ function animate() {
           const collisionVelocity = Math.max(Math.abs(lastVelocity.y), maxFallSpeed);
           const realPhysicsImpulse = params.characterMass * collisionVelocity * 0.4;
           lastImpulseValue = realPhysicsImpulse;
+
+          // 질량과 입수속도를 기반으로 한 정밀 최대 가라앉음 깊이 지표 산출
+          targetMaxDepth = (params.characterMass * collisionVelocity) / 350;
 
           if (realPhysicsImpulse >= params.dieThreshold) {
             isDead = true;
@@ -943,7 +1083,7 @@ function animate() {
               actionIndex = 3;
             }
           } else {
-            uiDisplay.innerHTML = `💦 퐁당! 입수 성공 (충격량: ${realPhysicsImpulse.toFixed(1)} N·s)<br>상태: 튜브 둥둥 🏊‍♂️`;
+            uiDisplay.innerHTML = `💦 퐁당! 입수 성공 (충격량: ${realPhysicsImpulse.toFixed(1)} N·s)<br>상태: 수면 하강 중... (예상 최대 깊이: -${targetMaxDepth.toFixed(1)}m)`;
             if (actions[actionIndex]) actions[actionIndex].stop();
             if (actions[5]) {
               actions[5].reset().fadeIn(0.2).play();
@@ -1019,7 +1159,7 @@ function animate() {
         let diff = targetRotationAngle - currentRotationAngle;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
 
-        // ★ 방향 전환 보정: dt를 곱해 프레임 변동과 무관하게 항상 부드러운 속도로 회전하도록 수정
+        // 방향 전환 보정
         currentRotationAngle += diff * 10.0 * dt;
 
         tempQuat.setFromAxisAngle(upAxis, currentRotationAngle);
