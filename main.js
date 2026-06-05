@@ -1518,11 +1518,17 @@ function startJump() {
 
   const jumpSpeed = 16.0;
 
-  const vx = Math.sin(currentRotationAngle) * jumpSpeed;
-  const vz = Math.cos(currentRotationAngle) * jumpSpeed;
+  const camForward = new THREE.Vector3();
+  camera.getWorldDirection(camForward);
+  camForward.y = 0;
+  camForward.normalize();
+
+  const vx = camForward.x * jumpSpeed;
+  const vz = camForward.z * jumpSpeed + 12.0;
 
   character.body.setLinvel({ x: vx, y: 7.5, z: vz }, true);
 
+  currentRotationAngle = Math.atan2(camForward.x, camForward.z);
   tempQuat.setFromAxisAngle(upAxis, currentRotationAngle);
   character.body.setRotation({ x: tempQuat.x, y: tempQuat.y, z: tempQuat.z, w: tempQuat.w }, true);
 
